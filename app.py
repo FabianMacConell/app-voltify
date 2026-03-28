@@ -4,7 +4,6 @@ import pandas as pd
 # Configuración inicial de la página
 st.set_page_config(page_title="Gestor Financiero Empresa", layout="wide")
 
-# Función para dar formato de moneda chilena
 def formato_clp(valor):
     try:
         return f"${int(valor):,.0f}".replace(",", ".")
@@ -12,9 +11,47 @@ def formato_clp(valor):
         return "$0"
 
 # ==========================================
-# MEMORIA DE LA APLICACIÓN (Datos fijos y editables)
+# SISTEMA DE LOGIN Y SEGURIDAD
 # ==========================================
-# 1. Sueldos
+# Base de datos de usuarios simulada
+USUARIOS = {
+    "admin": {"clave": "123", "rol": "Administrador"},
+    "visita": {"clave": "abc", "rol": "Observador"}
+}
+
+# Inicializar variables de sesión para el login
+if 'logeado' not in st.session_state:
+    st.session_state.logeado = False
+    st.session_state.usuario_actual = ""
+    st.session_state.rol_actual = ""
+
+# --- PANTALLA DE LOGIN ---
+if not st.session_state.logeado:
+    st.title("🔒 Acceso al Sistema Financiero")
+    st.write("Por favor, ingresa tus credenciales para continuar.")
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        usuario_input = st.text_input("Usuario")
+        clave_input = st.text_input("Contraseña", type="password")
+        
+        if st.button("Iniciar Sesión"):
+            if usuario_input in USUARIOS and USUARIOS[usuario_input]["clave"] == clave_input:
+                st.session_state.logeado = True
+                st.session_state.usuario_actual = usuario_input
+                st.session_state.rol_actual = USUARIOS[usuario_input]["rol"]
+                st.rerun() # Recarga la página para entrar
+            else:
+                st.error("❌ Usuario o contraseña incorrectos.")
+    
+    # Detenemos la ejecución del resto del código si no está logeado
+    st.stop()
+
+# ==========================================
+# VARIABLES DE MEMORIA (Solo se cargan si entró)
+# ==========================================
+es_admin = (st.session_state.rol_actual == "Administrador")
+
 if 'sueldos' not in st.session_state:
     st.session_state.sueldos = pd.DataFrame([
         {"Trabajador / Cargo": "Sueldo Técnico Principal", "Monto (CLP)": 800000},
@@ -22,49 +59,61 @@ if 'sueldos' not in st.session_state:
         {"Trabajador / Cargo": "Administración", "Monto (CLP)": 400000}
     ])
 
-# 2. Otros Gastos Fijos (que considero importantes)
 if 'gastos_fijos' not in st.session_state:
     st.session_state.gastos_fijos = pd.DataFrame([
         {"Descripción": "Arriendo Oficina / Bodega", "Monto (CLP)": 350000},
         {"Descripción": "Pago Contador", "Monto (CLP)": 60000},
-        {"Descripción": "Plan de Celular e Internet", "Monto (CLP)": 40000},
-        {"Descripción": "Seguros (Vehículos / Vida)", "Monto (CLP)": 35000}
+        {"Descripción": "Plan de Celular e Internet", "Monto (CLP)": 40000}
     ])
 
-# 3. Proyectos
 if 'proyectos' not in st.session_state:
     st.session_state.proyectos = {}
 
 # ==========================================
-# BARRA LATERAL (Menú)
+# BARRA LATERAL (Menú y Perfil)
 # ==========================================
-st.sidebar.title("⚙️ Panel de Control")
+st.sidebar.title("⚡ Panel Eléctrico")
+st.sidebar.info(f"👤 **Usuario:** {st.session_state.usuario_actual}\n\n🔑 **Rol:** {st.session_state.rol_actual}")
+
+if st.sidebar.button("Cerrar Sesión"):
+    st.session_state.logeado = False
+    st.rerun()
+
+st.sidebar.divider()
 menu = st.sidebar.radio("Navegación:", [
     "🏢 1. Área de Finanzas (Fijos)", 
     "📁 2. Área de Proyectos", 
     "📊 3. Flujo Total Empresa"
 ])
 
+if not es_admin:
+    st.sidebar.warning("Modo Observador: Solo lectura. No puedes modificar los datos.")
+
 # ==========================================
 # SECCIÓN 1: ÁREA DE FINANZAS
 # ==========================================
 if menu == "🏢 1. Área de Finanzas (Fijos)":
     st.title("🏢 Área de Finanzas y Personal")
-    st.write("Aquí registramos los costos que la empresa debe pagar mensualmente de manera obligatoria, sin importar si hay o no hay trabajos activos.")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("👥 Remuneraciones (Personal)")
-        # Tabla editable de sueldos
-        st.session_state.sueldos = st.data_editor(st.session_state.sueldos, num_rows="dynamic", key="tabla_sueldos", use_container_width=True)
+        st.subheader("👥 Remuneraciones")
+        if es_admin:
+            st.session_state.sueldos = st.data_editor(st.session_state.sueldos, num_rows="dynamic", use_container_width=True)
+        else:
+            st.dataframe(st.session_state.sueldos, use_container_width=True) # Solo lectura
+            
         total_sueldos = st.session_state.sueldos["Monto (CLP)"].sum()
         st.info(f"**Total Sueldos: {formato_clp(total_sueldos)}**")
 
     with col2:
         st.subheader("🏢 Otros Gastos Fijos")
-        # Tabla editable de otros gastos fijos
-        st.session_state.gastos_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", key="tabla_fijos", use_container_width=True)
+        if es_admin:
+            st.session_state.gastos_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True)
+        else:
+            st.dataframe(st.session_state.gastos_fijos, use_container_width=True) # Solo lectura
+            
         total_otros_fijos = st.session_state.gastos_fijos["Monto (CLP)"].sum()
         st.info(f"**Total Otros Fijos: {formato_clp(total_otros_fijos)}**")
 
@@ -74,68 +123,71 @@ if menu == "🏢 1. Área de Finanzas (Fijos)":
 elif menu == "📁 2. Área de Proyectos":
     st.title("📁 Gestión de Proyectos")
     
-    # Crear proyecto nuevo
-    st.markdown("### ➕ Ingresar Nuevo Trabajo")
-    colA, colB = st.columns([3, 1])
-    nuevo_proyecto = colA.text_input("Nombre del Proyecto o Trabajo")
-    if colB.button("Crear Carpeta"):
-        if nuevo_proyecto and nuevo_proyecto not in st.session_state.proyectos:
-            st.session_state.proyectos[nuevo_proyecto] = {
-                "cobro": 0.0,
-                "gastos": pd.DataFrame([{"Material / Gasto": "Ej: Cables, canalización, viáticos", "Costo (CLP)": 0}])
-            }
-            st.success(f"Trabajo '{nuevo_proyecto}' creado.")
-            st.rerun()
-            
-    st.divider()
+    # Crear proyecto nuevo (SOLO ADMINISTRADOR)
+    if es_admin:
+        st.markdown("### ➕ Ingresar Nuevo Trabajo")
+        colA, colB = st.columns([3, 1])
+        nuevo_proyecto = colA.text_input("Nombre del Proyecto o Trabajo")
+        if colB.button("Crear Carpeta"):
+            if nuevo_proyecto and nuevo_proyecto not in st.session_state.proyectos:
+                st.session_state.proyectos[nuevo_proyecto] = {
+                    "cobro": 0.0,
+                    "gastos": pd.DataFrame([{"Material / Gasto": "Cables, viáticos, etc", "Costo (CLP)": 0}])
+                }
+                st.success(f"Trabajo '{nuevo_proyecto}' creado.")
+                st.rerun()
+        st.divider()
 
-    # Editar proyectos existentes
+    # Ver o Editar proyectos existentes
     if st.session_state.proyectos:
         st.markdown("### 🛠️ Detalles del Trabajo")
-        proyecto_actual = st.selectbox("Selecciona un proyecto para evaluarlo:", list(st.session_state.proyectos.keys()))
+        proyecto_actual = st.selectbox("Selecciona un proyecto:", list(st.session_state.proyectos.keys()))
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("💰 Ingreso (Lo que se cobra)")
-            # Campo para actualizar el cobro total al cliente
+            st.subheader("💰 Ingreso (Cobro)")
             cobro_actual = st.session_state.proyectos[proyecto_actual]["cobro"]
-            nuevo_cobro = st.number_input("Monto total cobrado al cliente por este trabajo (CLP):", min_value=0.0, value=float(cobro_actual), step=10000.0)
-            st.session_state.proyectos[proyecto_actual]["cobro"] = nuevo_cobro
+            
+            if es_admin:
+                nuevo_cobro = st.number_input("Monto cobrado (CLP):", min_value=0.0, value=float(cobro_actual), step=10000.0)
+                st.session_state.proyectos[proyecto_actual]["cobro"] = nuevo_cobro
+            else:
+                st.write(f"**Monto cobrado:** {formato_clp(cobro_actual)}")
+                nuevo_cobro = cobro_actual
             
         with col2:
-            st.subheader("💸 Gastos Específicos del Trabajo")
-            # Tabla editable para los gastos directos del proyecto
-            df_gastos = st.data_editor(st.session_state.proyectos[proyecto_actual]["gastos"], num_rows="dynamic", key=f"gastos_{proyecto_actual}", use_container_width=True)
-            st.session_state.proyectos[proyecto_actual]["gastos"] = df_gastos
+            st.subheader("💸 Gastos del Trabajo")
+            if es_admin:
+                df_gastos = st.data_editor(st.session_state.proyectos[proyecto_actual]["gastos"], num_rows="dynamic", use_container_width=True)
+                st.session_state.proyectos[proyecto_actual]["gastos"] = df_gastos
+            else:
+                df_gastos = st.session_state.proyectos[proyecto_actual]["gastos"]
+                st.dataframe(df_gastos, use_container_width=True)
+                
             total_gastos_proyecto = df_gastos["Costo (CLP)"].sum()
-            st.write(f"**Total Gastos del Proyecto: {formato_clp(total_gastos_proyecto)}**")
+            st.write(f"**Total Gastos: {formato_clp(total_gastos_proyecto)}**")
             
-        # Rentabilidad individual del proyecto
         utilidad_proyecto = nuevo_cobro - total_gastos_proyecto
-        st.success(f"**Margen de este trabajo:** {formato_clp(utilidad_proyecto)}")
+        st.success(f"**Margen del trabajo:** {formato_clp(utilidad_proyecto)}")
     else:
-        st.info("Crea tu primer proyecto arriba para comenzar a evaluar.")
+        st.info("No hay proyectos activos aún.")
 
 # ==========================================
 # SECCIÓN 3: FLUJO TOTAL EMPRESA
 # ==========================================
 elif menu == "📊 3. Flujo Total Empresa":
     st.title("📊 Flujo Total y Rentabilidad")
-    st.write("Esta sección cruza las entradas (Proyectos) y salidas (Gastos de Proyectos + Finanzas Fijas) para mostrar la salud real de tu empresa.")
     
-    # Cálculos
-    total_ingresos_proyectos = sum([datos["cobro"] for datos in st.session_state.proyectos.values()])
-    total_gastos_proyectos = sum([datos["gastos"]["Costo (CLP)"].sum() for datos in st.session_state.proyectos.values()])
+    total_ingresos_proyectos = sum([datos["cobro"] for datos in st.session_state.proyectos.values()]) if st.session_state.proyectos else 0
+    total_gastos_proyectos = sum([datos["gastos"]["Costo (CLP)"].sum() for datos in st.session_state.proyectos.values()]) if st.session_state.proyectos else 0
     total_sueldos_empresa = st.session_state.sueldos["Monto (CLP)"].sum()
     total_otros_fijos = st.session_state.gastos_fijos["Monto (CLP)"].sum()
     
-    # Resumen general
     total_entradas = total_ingresos_proyectos
     total_salidas = total_gastos_proyectos + total_sueldos_empresa + total_otros_fijos
     rentabilidad = total_entradas - total_salidas
     
-    # Tarjetas métricas
     col1, col2, col3 = st.columns(3)
     col1.metric("ENTRADAS (Cobros Totales)", formato_clp(total_entradas))
     col2.metric("SALIDAS (Todos los Gastos)", formato_clp(total_salidas))
@@ -143,19 +195,8 @@ elif menu == "📊 3. Flujo Total Empresa":
     
     st.divider()
     
-    # Desglose detallado
     st.markdown("### 🔍 Desglose del Flujo de Caja")
-    st.write(f"🟢 **+ {formato_clp(total_ingresos_proyectos)}** (Ingresos por cobros de trabajos realizados)")
-    st.write(f"🔴 **- {formato_clp(total_gastos_proyectos)}** (Costos directos de materiales/insumos de esos trabajos)")
-    st.write(f"🔴 **- {formato_clp(total_sueldos_empresa)}** (Pago total de sueldos al personal)")
-    st.write(f"🔴 **- {formato_clp(total_otros_fijos)}** (Pago de arriendos, contador y fijos)")
-    
-    st.divider()
-    
-    # Mensaje de evaluación automática
-    if rentabilidad > 0:
-        st.success("✅ **¡Excelente!** La empresa es rentable. Los trabajos están cubriendo sus propios materiales y además soportan toda la carga fija de la empresa (sueldos y oficinas).")
-    elif rentabilidad < 0:
-        st.error(f"⚠️ **Atención:** La empresa está en pérdida. Te faltan {formato_clp(abs(rentabilidad))} en ingresos de proyectos para cubrir tus costos fijos mensuales.")
-    else:
-        st.info("⚖️ **Punto de equilibrio:** No ganas ni pierdes, cubres exactamente tus costos.")
+    st.write(f"🟢 **+ {formato_clp(total_ingresos_proyectos)}** (Ingresos por proyectos)")
+    st.write(f"🔴 **- {formato_clp(total_gastos_proyectos)}** (Costos de materiales de proyectos)")
+    st.write(f"🔴 **- {formato_clp(total_sueldos_empresa)}** (Sueldos del personal)")
+    st.write(f"🔴 **- {formato_clp(total_otros_fijos)}** (Gastos fijos y oficina)")
