@@ -15,7 +15,7 @@ def formato_clp(valor):
 # ==========================================
 # Base de datos de usuarios simulada
 USUARIOS = {
-    "admin": {"clave": "123", "rol": "Administrador"},
+    "admin": {"clave": "voltify2026@", "rol": "Administrador"},
     "visita": {"clave": "abc", "rol": "Observador"}
 }
 
