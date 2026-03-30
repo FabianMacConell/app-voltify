@@ -6,7 +6,7 @@ import pandas as pd
 # ==========================================
 st.set_page_config(page_title="Voltify - Panel Financiero", page_icon="⚡", layout="wide")
 
-NOMBRE_EMPRESA = "Voltify"
+NOMBRE_EMPRESA = ""
 # Cuando subas tu logo real, cambiaremos este enlace por "logo.png"
 LOGO_URL = "logo.png"
 
