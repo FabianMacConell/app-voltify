@@ -8,7 +8,7 @@ st.set_page_config(page_title="Voltify - Panel Financiero", page_icon="⚡", lay
 
 NOMBRE_EMPRESA = "Voltify"
 # Cuando subas tu logo real, cambiaremos este enlace por "logo.png"
-LOGO_URL = "https://via.placeholder.com/600x150/005cba/FFFFFF?text=VOLTIFY+(TU+LOGO+AQUI)"
+LOGO_URL = "logo.png"
 
 # Función para mostrar la cabecera en todas las páginas
 def cabecera_corporativa(titulo_seccion):
