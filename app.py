@@ -7,7 +7,7 @@ import pandas as pd
 st.set_page_config(page_title="Panel Financiero", page_icon="⚡", layout="wide")
 
 # Reemplaza este enlace por "logo.png" cuando subas tu propia imagen a GitHub
-LOGO_URL = "https://via.placeholder.com/600x150/005cba/FFFFFF?text=TU+LOGO+AQUI"
+LOGO_URL = "logo.png"
 
 # Función para mostrar la cabecera (Logo + Título de la sección)
 def cabecera_corporativa(titulo_seccion):
