@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 
-# Configuración inicial de la página
-st.set_page_config(page_title="Gestor Financiero Empresa", layout="wide")
+# 1. NOMBRE Y LOGO EN LA PESTAÑA DEL NAVEGADOR
+st.set_page_config(page_title="Voltify - Finanzas", page_icon="⚡", layout="wide")
 
 def formato_clp(valor):
     try:
@@ -13,13 +13,11 @@ def formato_clp(valor):
 # ==========================================
 # SISTEMA DE LOGIN Y SEGURIDAD
 # ==========================================
-# Base de datos de usuarios simulada
 USUARIOS = {
-    "admin": {"clave": "voltify2026@", "rol": "Administrador"},
+    "admin": {"clave": "123", "rol": "Administrador"},
     "visita": {"clave": "abc", "rol": "Observador"}
 }
 
-# Inicializar variables de sesión para el login
 if 'logeado' not in st.session_state:
     st.session_state.logeado = False
     st.session_state.usuario_actual = ""
@@ -27,6 +25,8 @@ if 'logeado' not in st.session_state:
 
 # --- PANTALLA DE LOGIN ---
 if not st.session_state.logeado:
+    # Agregamos el logo en la pantalla de inicio
+    st.image("https://via.placeholder.com/400x120/005cba/FFFFFF?text=VOLTIFY", width=300)
     st.title("🔒 Acceso al Sistema Financiero")
     st.write("Por favor, ingresa tus credenciales para continuar.")
     
@@ -40,15 +40,13 @@ if not st.session_state.logeado:
                 st.session_state.logeado = True
                 st.session_state.usuario_actual = usuario_input
                 st.session_state.rol_actual = USUARIOS[usuario_input]["rol"]
-                st.rerun() # Recarga la página para entrar
+                st.rerun() 
             else:
                 st.error("❌ Usuario o contraseña incorrectos.")
-    
-    # Detenemos la ejecución del resto del código si no está logeado
     st.stop()
 
 # ==========================================
-# VARIABLES DE MEMORIA (Solo se cargan si entró)
+# VARIABLES DE MEMORIA 
 # ==========================================
 es_admin = (st.session_state.rol_actual == "Administrador")
 
@@ -72,7 +70,9 @@ if 'proyectos' not in st.session_state:
 # ==========================================
 # BARRA LATERAL (Menú y Perfil)
 # ==========================================
-st.sidebar.title("⚡ Panel Eléctrico")
+# 2. LOGO EN EL MENÚ LATERAL
+st.sidebar.image("https://via.placeholder.com/400x120/005cba/FFFFFF?text=VOLTIFY", use_container_width=True)
+
 st.sidebar.info(f"👤 **Usuario:** {st.session_state.usuario_actual}\n\n🔑 **Rol:** {st.session_state.rol_actual}")
 
 if st.sidebar.button("Cerrar Sesión"):
@@ -94,7 +94,6 @@ if not es_admin:
 # ==========================================
 if menu == "🏢 1. Área de Finanzas (Fijos)":
     st.title("🏢 Área de Finanzas y Personal")
-    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -102,7 +101,7 @@ if menu == "🏢 1. Área de Finanzas (Fijos)":
         if es_admin:
             st.session_state.sueldos = st.data_editor(st.session_state.sueldos, num_rows="dynamic", use_container_width=True)
         else:
-            st.dataframe(st.session_state.sueldos, use_container_width=True) # Solo lectura
+            st.dataframe(st.session_state.sueldos, use_container_width=True) 
             
         total_sueldos = st.session_state.sueldos["Monto (CLP)"].sum()
         st.info(f"**Total Sueldos: {formato_clp(total_sueldos)}**")
@@ -112,7 +111,7 @@ if menu == "🏢 1. Área de Finanzas (Fijos)":
         if es_admin:
             st.session_state.gastos_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True)
         else:
-            st.dataframe(st.session_state.gastos_fijos, use_container_width=True) # Solo lectura
+            st.dataframe(st.session_state.gastos_fijos, use_container_width=True) 
             
         total_otros_fijos = st.session_state.gastos_fijos["Monto (CLP)"].sum()
         st.info(f"**Total Otros Fijos: {formato_clp(total_otros_fijos)}**")
@@ -123,7 +122,6 @@ if menu == "🏢 1. Área de Finanzas (Fijos)":
 elif menu == "📁 2. Área de Proyectos":
     st.title("📁 Gestión de Proyectos")
     
-    # Crear proyecto nuevo (SOLO ADMINISTRADOR)
     if es_admin:
         st.markdown("### ➕ Ingresar Nuevo Trabajo")
         colA, colB = st.columns([3, 1])
@@ -138,17 +136,14 @@ elif menu == "📁 2. Área de Proyectos":
                 st.rerun()
         st.divider()
 
-    # Ver o Editar proyectos existentes
     if st.session_state.proyectos:
         st.markdown("### 🛠️ Detalles del Trabajo")
         proyecto_actual = st.selectbox("Selecciona un proyecto:", list(st.session_state.proyectos.keys()))
-        
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("💰 Ingreso (Cobro)")
             cobro_actual = st.session_state.proyectos[proyecto_actual]["cobro"]
-            
             if es_admin:
                 nuevo_cobro = st.number_input("Monto cobrado (CLP):", min_value=0.0, value=float(cobro_actual), step=10000.0)
                 st.session_state.proyectos[proyecto_actual]["cobro"] = nuevo_cobro
@@ -194,7 +189,6 @@ elif menu == "📊 3. Flujo Total Empresa":
     col3.metric("RENTABILIDAD NETA", formato_clp(rentabilidad))
     
     st.divider()
-    
     st.markdown("### 🔍 Desglose del Flujo de Caja")
     st.write(f"🟢 **+ {formato_clp(total_ingresos_proyectos)}** (Ingresos por proyectos)")
     st.write(f"🔴 **- {formato_clp(total_gastos_proyectos)}** (Costos de materiales de proyectos)")
