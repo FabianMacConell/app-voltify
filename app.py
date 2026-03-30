@@ -6,11 +6,13 @@ import pandas as pd
 # ==========================================
 st.set_page_config(page_title="Panel Financiero", page_icon="⚡", layout="wide")
 
-# TRUCO PARA OCULTAR EL MENÚ DE STREAMLIT Y HACERLO PARECER UN SOFTWARE PRIVADO
+# TRUCO PARA OCULTAR EL MENÚ DE STREAMLIT (CORREGIDO)
 ocultar_menu_estilo = """
             <style>
-            #MainMenu {visibility: hidden;}
-            header {visibility: hidden;}
+            /* Oculta los botones de la esquina superior derecha (Deploy, tres puntos) */
+            [data-testid="stHeaderActionElements"] {visibility: hidden;}
+            
+            /* Oculta la marca de agua de "Made with Streamlit" abajo */
             footer {visibility: hidden;}
             </style>
             """
