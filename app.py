@@ -14,7 +14,7 @@ def formato_clp(valor):
 # SISTEMA DE LOGIN Y SEGURIDAD
 # ==========================================
 USUARIOS = {
-    "admin": {"clave": "123", "rol": "Administrador"},
+    "admin": {"clave": "voltify2026@", "rol": "Administrador"},
     "visita": {"clave": "abc", "rol": "Observador"}
 }
 
