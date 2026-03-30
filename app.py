@@ -21,8 +21,6 @@ st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
 # Imagen fija apuntando al archivo subido en el repositorio
 LOGO_URL = "logo.png"
 
-# ... (De aquí hacia abajo todo tu código sigue exactamente igual) ...
-
 # Función para mostrar la cabecera (Logo + Título de la sección)
 def cabecera_corporativa(titulo_seccion):
     col1, col2 = st.columns([1, 4])
@@ -182,29 +180,4 @@ elif menu == "📁 2. Gestión de Proyectos":
             total_gastos = df_gastos["Costo (CLP)"].sum()
             st.write(f"**Suma de Gastos: {formato_clp(total_gastos)}**")
             
-        st.success(f"**Margen del proyecto:** {formato_clp(nuevo_cobro - total_gastos)}")
-    else:
-        st.info("Sin proyectos activos.")
-
-# --- PANTALLA 3: FLUJO TOTAL ---
-elif menu == "📊 3. Flujo y Rentabilidad":
-    cabecera_corporativa("Balance General Empresa")
-    
-    ingresos_proy = sum([d["cobro"] for d in st.session_state.proyectos.values()]) if st.session_state.proyectos else 0
-    gastos_proy = sum([d["gastos"]["Costo (CLP)"].sum() for d in st.session_state.proyectos.values()]) if st.session_state.proyectos else 0
-    total_fijos = st.session_state.sueldos["Monto (CLP)"].sum() + st.session_state.gastos_fijos["Monto (CLP)"].sum()
-    
-    total_entradas = ingresos_proy
-    total_salidas = gastos_proy + total_fijos
-    rentabilidad = total_entradas - total_salidas
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("ENTRADAS GLOBALES", formato_clp(total_entradas))
-    col2.metric("SALIDAS GLOBALES", formato_clp(total_salidas))
-    col3.metric("RENTABILIDAD NETA", formato_clp(rentabilidad))
-    
-    st.divider()
-    st.markdown("### 🔍 Desglose")
-    st.write(f"🟢 **+ {formato_clp(ingresos_proy)}** (Cobros de proyectos)")
-    st.write(f"🔴 **- {formato_clp(gastos_proy)}** (Materiales de proyectos)")
-    st.write(f"🔴 **- {formato_clp(total_fijos)}** (Sueldos y gastos de oficina)")
+        st.success(f"**Margen del proyecto:** {formato_clp(nuevo_cob
