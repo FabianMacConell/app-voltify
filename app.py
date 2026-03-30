@@ -6,8 +6,20 @@ import pandas as pd
 # ==========================================
 st.set_page_config(page_title="Panel Financiero", page_icon="⚡", layout="wide")
 
-# Reemplaza este enlace por "logo.png" cuando subas tu propia imagen a GitHub
+# TRUCO PARA OCULTAR EL MENÚ DE STREAMLIT Y HACERLO PARECER UN SOFTWARE PRIVADO
+ocultar_menu_estilo = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            header {visibility: hidden;}
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
+
+# Imagen fija apuntando al archivo subido en el repositorio
 LOGO_URL = "logo.png"
+
+# ... (De aquí hacia abajo todo tu código sigue exactamente igual) ...
 
 # Función para mostrar la cabecera (Logo + Título de la sección)
 def cabecera_corporativa(titulo_seccion):
