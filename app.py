@@ -1,43 +1,66 @@
 import streamlit as st
 import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
+import json
 
 # ==========================================
 # 1. CONFIGURACIÓN E IDENTIDAD VISUAL
 # ==========================================
 st.set_page_config(page_title="Panel Financiero", page_icon="⚡", layout="wide")
 
-# TRUCO PARA OCULTAR EL MENÚ DE STREAMLIT (CORREGIDO)
 ocultar_menu_estilo = """
             <style>
-            /* Oculta los botones de la esquina superior derecha (Deploy, tres puntos) */
             [data-testid="stHeaderActionElements"] {visibility: hidden;}
-            
-            /* Oculta la marca de agua de "Made with Streamlit" abajo */
             footer {visibility: hidden;}
             </style>
             """
 st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
 
-# Imagen fija apuntando al archivo subido en el repositorio
 LOGO_URL = "logo.png"
 
-# Función para mostrar la cabecera (Logo + Título de la sección)
-def cabecera_corporativa(titulo_seccion):
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        st.image(LOGO_URL, use_container_width=True)
-    with col2:
-        st.title(titulo_seccion)
-    st.divider()
+# ==========================================
+# 2. CONEXIÓN A GOOGLE SHEETS
+# ==========================================
+def conectar_google_sheets():
+    # Cargamos las credenciales desde los Secrets de Streamlit
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds_dict = json.loads(st.secrets["google_credentials"])
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    client = gspread.authorize(creds)
+    # Debe coincidir exactamente con el nombre de tu archivo en Google Drive
+    return client.open("Base de Datos Voltify")
 
-def formato_clp(valor):
+def obtener_o_crear_hoja(libro, nombre_hoja, columnas):
     try:
-        return f"${int(valor):,.0f}".replace(",", ".")
-    except ValueError:
-        return "$0"
+        return libro.worksheet(nombre_hoja)
+    except gspread.exceptions.WorksheetNotFound:
+        hoja = libro.add_worksheet(title=nombre_hoja, rows="100", cols=str(len(columnas)))
+        hoja.append_row(columnas)
+        return hoja
+
+def guardar_datos(nombre_hoja, df):
+    try:
+        libro = conectar_google_sheets()
+        hoja = obtener_o_crear_hoja(libro, nombre_hoja, df.columns.tolist())
+        hoja.clear()
+        hoja.update([df.columns.values.tolist()] + df.values.tolist())
+    except Exception as e:
+        st.error(f"Error al guardar: {e}")
+
+def cargar_datos(nombre_hoja, columnas_default):
+    try:
+        libro = conectar_google_sheets()
+        hoja = obtener_o_crear_hoja(libro, nombre_hoja, [c[0] for c in columnas_default.items()])
+        datos = hoja.get_all_records()
+        if not datos:
+            return pd.DataFrame(columnas_default)
+        return pd.DataFrame(datos)
+    except Exception:
+        return pd.DataFrame(columnas_default)
 
 # ==========================================
-# 2. SISTEMA DE LOGIN
+# 3. SISTEMA DE LOGIN
 # ==========================================
 USUARIOS = {
     "admin": {"clave": "123", "rol": "Administrador"},
@@ -52,157 +75,122 @@ if 'logeado' not in st.session_state:
 if not st.session_state.logeado:
     st.image(LOGO_URL, width=350)
     st.title("🔒 Portal de Acceso")
-    st.write("Bienvenido al sistema financiero. Ingresa tus credenciales para continuar.")
-    
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        usuario_input = st.text_input("Usuario")
-        clave_input = st.text_input("Contraseña", type="password")
-        if st.button("Iniciar Sesión", type="primary"):
-            if usuario_input in USUARIOS and USUARIOS[usuario_input]["clave"] == clave_input:
-                st.session_state.logeado = True
-                st.session_state.usuario_actual = usuario_input
-                st.session_state.rol_actual = USUARIOS[usuario_input]["rol"]
-                st.rerun() 
-            else:
-                st.error("❌ Credenciales incorrectas.")
+    usuario_input = st.text_input("Usuario")
+    clave_input = st.text_input("Contraseña", type="password")
+    if st.button("Iniciar Sesión", type="primary"):
+        if usuario_input in USUARIOS and USUARIOS[usuario_input]["clave"] == clave_input:
+            st.session_state.logeado = True
+            st.session_state.usuario_actual = usuario_input
+            st.session_state.rol_actual = USUARIOS[usuario_input]["rol"]
+            st.rerun()
+        else:
+            st.error("❌ Credenciales incorrectas.")
     st.stop()
 
 # ==========================================
-# 3. BASE DE DATOS (Memoria)
+# 4. CARGA INICIAL DE DATOS DESDE NUBE
 # ==========================================
 es_admin = (st.session_state.rol_actual == "Administrador")
 
 if 'sueldos' not in st.session_state:
-    st.session_state.sueldos = pd.DataFrame([
-        {"Trabajador / Cargo": "Sueldo Técnico Principal", "Monto (CLP)": 800000},
-        {"Trabajador / Cargo": "Sueldo Ayudante", "Monto (CLP)": 500000},
-        {"Trabajador / Cargo": "Administración", "Monto (CLP)": 400000}
+    st.session_state.sueldos = cargar_datos("Sueldos", [
+        {"Trabajador / Cargo": "Técnico Principal", "Monto (CLP)": 800000},
+        {"Trabajador / Cargo": "Ayudante (cada visita consta de 2 dias)", "Monto (CLP)": 500000}
     ])
 
 if 'gastos_fijos' not in st.session_state:
-    st.session_state.gastos_fijos = pd.DataFrame([
-        {"Descripción": "Arriendo Oficina / Bodega", "Monto (CLP)": 350000},
-        {"Descripción": "Pago Contador", "Monto (CLP)": 60000},
-        {"Descripción": "Plan de Celular e Internet", "Monto (CLP)": 40000}
+    st.session_state.gastos_fijos = cargar_datos("Gastos_Fijos", [
+        {"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000},
+        {"Descripción": "Prioridad Emergencias", "Monto (CLP)": 50000}
     ])
 
-if 'proyectos' not in st.session_state:
-    st.session_state.proyectos = {}
+# Los proyectos se manejan de forma dinámica
+if 'proyectos_db' not in st.session_state:
+    st.session_state.proyectos_db = cargar_datos("Proyectos", ["Nombre", "Cobro_Total", "Gastos_Totales"])
 
 # ==========================================
-# 4. BARRA LATERAL (Navegación)
+# 5. INTERFAZ Y NAVEGACIÓN
 # ==========================================
 st.sidebar.image(LOGO_URL, use_container_width=True)
-st.sidebar.info(f"👤 **{st.session_state.usuario_actual}**\n\n🔑 Nivel: {st.session_state.rol_actual}")
+st.sidebar.info(f"👤 **{st.session_state.usuario_actual}** | {st.session_state.rol_actual}")
 
 if st.sidebar.button("Cerrar Sesión"):
     st.session_state.logeado = False
     st.rerun()
 
-st.sidebar.divider()
-menu = st.sidebar.radio("Navegación Principal:", [
-    "🏢 1. Finanzas y Personal", 
-    "📁 2. Gestión de Proyectos", 
-    "📊 3. Flujo y Rentabilidad"
-])
+menu = st.sidebar.radio("Navegación:", ["🏢 Finanzas", "📁 Proyectos", "📊 Balance Total"])
 
-if not es_admin:
-    st.sidebar.warning("Modo Observador activo (Solo lectura).")
+def formato_clp(valor):
+    return f"${int(valor):,.0f}".replace(",", ".")
 
-# ==========================================
-# 5. PANTALLAS DE LA APLICACIÓN
-# ==========================================
-
-# --- PANTALLA 1: FINANZAS ---
-if menu == "🏢 1. Finanzas y Personal":
-    cabecera_corporativa("Área de Finanzas (Fijos)")
-    
+# --- PANTALLA FINANZAS ---
+if menu == "🏢 Finanzas":
+    st.header("Área de Finanzas (Fijos)")
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("👥 Remuneraciones")
         if es_admin:
-            st.session_state.sueldos = st.data_editor(st.session_state.sueldos, num_rows="dynamic", use_container_width=True)
+            res_sueldos = st.data_editor(st.session_state.sueldos, num_rows="dynamic", use_container_width=True, key="ed_sueldos")
+            if st.button("💾 Guardar Cambios Sueldos"):
+                st.session_state.sueldos = res_sueldos
+                guardar_datos("Sueldos", res_sueldos)
+                st.success("Guardado en la nube.")
         else:
-            st.dataframe(st.session_state.sueldos, use_container_width=True) 
-        st.info(f"**Total Sueldos: {formato_clp(st.session_state.sueldos['Monto (CLP)'].sum())}**")
-
+            st.dataframe(st.session_state.sueldos, use_container_width=True)
+    
     with col2:
-        st.subheader("🏢 Otros Gastos Fijos")
+        st.subheader("🏢 Gastos Fijos")
         if es_admin:
-            st.session_state.gastos_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True)
+            res_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True, key="ed_fijos")
+            if st.button("💾 Guardar Cambios Fijos"):
+                st.session_state.gastos_fijos = res_fijos
+                guardar_datos("Gastos_Fijos", res_fijos)
+                st.success("Guardado en la nube.")
         else:
-            st.dataframe(st.session_state.gastos_fijos, use_container_width=True) 
-        st.info(f"**Total Otros Fijos: {formato_clp(st.session_state.gastos_fijos['Monto (CLP)'].sum())}**")
+            st.dataframe(st.session_state.gastos_fijos, use_container_width=True)
 
-# --- PANTALLA 2: PROYECTOS ---
-elif menu == "📁 2. Gestión de Proyectos":
-    cabecera_corporativa("Área de Proyectos")
+# --- PANTALLA PROYECTOS ---
+elif menu == "📁 Proyectos":
+    st.header("Gestión de Proyectos")
     
     if es_admin:
-        st.markdown("### ➕ Registrar Nuevo Trabajo")
-        colA, colB = st.columns([3, 1])
-        nuevo_proyecto = colA.text_input("Nombre del Trabajo")
-        if colB.button("Crear Carpeta", type="primary"):
-            if nuevo_proyecto and nuevo_proyecto not in st.session_state.proyectos:
-                st.session_state.proyectos[nuevo_proyecto] = {
-                    "cobro": 0.0,
-                    "gastos": pd.DataFrame([{"Material / Gasto": "Ej: Cables, Viáticos", "Costo (CLP)": 0}])
-                }
-                st.success(f"Trabajo '{nuevo_proyecto}' creado.")
+        with st.expander("➕ Crear Nuevo Proyecto"):
+            nombre_p = st.text_input("Nombre del Trabajo")
+            cobro_p = st.number_input("Monto a cobrar", min_value=0)
+            gastos_p = st.number_input("Gastos estimados", min_value=0)
+            if st.button("Crear"):
+                nuevo_p = pd.DataFrame([{"Nombre": nombre_p, "Cobro_Total": cobro_p, "Gastos_Totales": gastos_p}])
+                st.session_state.proyectos_db = pd.concat([st.session_state.proyectos_db, nuevo_p], ignore_index=True)
+                guardar_datos("Proyectos", st.session_state.proyectos_db)
                 st.rerun()
-        st.divider()
 
-    if st.session_state.proyectos:
-        st.markdown("### 🛠️ Detalles del Trabajo")
-        proyecto_actual = st.selectbox("Seleccionar Proyecto:", list(st.session_state.proyectos.keys()))
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("💰 Cobro al Cliente")
-            cobro_actual = st.session_state.proyectos[proyecto_actual]["cobro"]
-            if es_admin:
-                nuevo_cobro = st.number_input("Monto total (CLP):", min_value=0.0, value=float(cobro_actual), step=10000.0)
-                st.session_state.proyectos[proyecto_actual]["cobro"] = nuevo_cobro
-            else:
-                st.write(f"**Monto cobrado:** {formato_clp(cobro_actual)}")
-                nuevo_cobro = cobro_actual
-            
-        with col2:
-            st.subheader("💸 Gastos Internos")
-            if es_admin:
-                df_gastos = st.data_editor(st.session_state.proyectos[proyecto_actual]["gastos"], num_rows="dynamic", use_container_width=True)
-                st.session_state.proyectos[proyecto_actual]["gastos"] = df_gastos
-            else:
-                df_gastos = st.session_state.proyectos[proyecto_actual]["gastos"]
-                st.dataframe(df_gastos, use_container_width=True)
-                
-            total_gastos = df_gastos["Costo (CLP)"].sum()
-            st.write(f"**Suma de Gastos: {formato_clp(total_gastos)}**")
-            
-        st.success(f"**Margen del proyecto:** {formato_clp(nuevo_cobro - total_gastos)}")
+    st.subheader("🛠️ Listado de Proyectos Activos")
+    if es_admin:
+        res_proyectos = st.data_editor(st.session_state.proyectos_db, num_rows="dynamic", use_container_width=True, key="ed_proy")
+        if st.button("💾 Sincronizar Proyectos"):
+            st.session_state.proyectos_db = res_proyectos
+            guardar_datos("Proyectos", res_proyectos)
+            st.success("Proyectos actualizados.")
     else:
-        st.info("Sin proyectos activos.")
+        st.dataframe(st.session_state.proyectos_db, use_container_width=True)
 
-# --- PANTALLA 3: FLUJO TOTAL ---
-elif menu == "📊 3. Flujo y Rentabilidad":
-    cabecera_corporativa("Balance General Empresa")
+# --- PANTALLA BALANCE ---
+elif menu == "📊 Balance Total":
+    st.header("Balance General")
     
-    ingresos_proy = sum([d["cobro"] for d in st.session_state.proyectos.values()]) if st.session_state.proyectos else 0
-    gastos_proy = sum([d["gastos"]["Costo (CLP)"].sum() for d in st.session_state.proyectos.values()]) if st.session_state.proyectos else 0
-    total_fijos = st.session_state.sueldos["Monto (CLP)"].sum() + st.session_state.gastos_fijos["Monto (CLP)"].sum()
+    ingresos = st.session_state.proyectos_db["Cobro_Total"].sum()
+    costos_proy = st.session_state.proyectos_db["Gastos_Totales"].sum()
+    fijos = st.session_state.sueldos["Monto (CLP)"].sum() + st.session_state.gastos_fijos["Monto (CLP)"].sum()
     
-    total_entradas = ingresos_proy
-    total_salidas = gastos_proy + total_fijos
-    rentabilidad = total_entradas - total_salidas
+    rentabilidad = ingresos - costos_proy - fijos
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("ENTRADAS GLOBALES", formato_clp(total_entradas))
-    col2.metric("SALIDAS GLOBALES", formato_clp(total_salidas))
-    col3.metric("RENTABILIDAD NETA", formato_clp(rentabilidad))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("INGRESOS", formato_clp(ingresos))
+    c2.metric("EGRESOS TOTALES", formato_clp(costos_proy + fijos))
+    c3.metric("UTILIDAD NETA", formato_clp(rentabilidad))
     
-    st.divider()
-    st.markdown("### 🔍 Desglose")
-    st.write(f"🟢 **+ {formato_clp(ingresos_proy)}** (Cobros de proyectos)")
-    st.write(f"🔴 **- {formato_clp(gastos_proy)}** (Materiales de proyectos)")
-    st.write(f"🔴 **- {formato_clp(total_fijos)}** (Sueldos y gastos de oficina)")
+    if rentabilidad > 0:
+        st.success("La empresa es rentable.")
+    else:
+        st.error("Alerta: Gastos superan ingresos.")
