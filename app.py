@@ -219,7 +219,6 @@ elif menu == "📁 Proyectos":
         with col2:
             st.write("### 💸 Gastos Desglosados")
             if es_admin:
-                # Mostrar solo las columnas de Detalle y Monto para que sea más limpio
                 df_edit = df_gastos_proy[["Detalle_Gasto", "Monto"]]
                 df_gastos_editados = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True, key=f"gast_{proyecto_seleccionado}")
             else:
@@ -238,22 +237,36 @@ elif menu == "📁 Proyectos":
         c3.metric("Ganancia del Proyecto", formato_clp(ganancia_proyecto))
 
         if es_admin:
-            if st.button("💾 Guardar Cambios de este Proyecto", type="primary"):
-                # 1. Actualizar el Cobro en el Resumen
-                st.session_state.proyectos_resumen.at[idx_proy, "Cobro"] = nuevo_cobro
-                
-                # 2. Actualizar la tabla de Gastos
-                # Borrar los gastos antiguos de ESTE proyecto
-                st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
-                # Agregar la columna del nombre del proyecto a los nuevos datos editados
-                df_gastos_editados["Proyecto"] = proyecto_seleccionado
-                # Unir a la base de datos principal
-                st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_gastos_editados], ignore_index=True)
-                
-                # Guardar todo en la nube
-                guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
-                guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                st.success("¡Carpeta actualizada y guardada en la base de datos!")
+            st.write("---")
+            # Botones de Acción (Guardar o Eliminar)
+            col_save, col_del = st.columns(2)
+            
+            with col_save:
+                if st.button("💾 Guardar Cambios de este Proyecto", type="primary", use_container_width=True):
+                    # 1. Actualizar el Cobro en el Resumen
+                    st.session_state.proyectos_resumen.at[idx_proy, "Cobro"] = nuevo_cobro
+                    
+                    # 2. Actualizar la tabla de Gastos
+                    st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
+                    df_gastos_editados["Proyecto"] = proyecto_seleccionado
+                    st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_gastos_editados], ignore_index=True)
+                    
+                    guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
+                    guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                    st.success("¡Carpeta actualizada y guardada!")
+            
+            with col_del:
+                if st.button("🗑️ Eliminar Proyecto Completo", use_container_width=True):
+                    # Borrar del Resumen
+                    st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado].reset_index(drop=True)
+                    # Borrar de Gastos
+                    st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado].reset_index(drop=True)
+                    
+                    # Guardar la base de datos limpia
+                    guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
+                    guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                    st.rerun()
+
     else:
         st.info("No hay proyectos activos. Despliega el menú de arriba para crear tu primer proyecto.")
 
