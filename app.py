@@ -58,13 +58,35 @@ def cargar_datos(nombre_hoja, df_default):
         return df_default
 
 # ==========================================
-# 3. CONTROL DE ACCESOS POR SECCIÓN (Memoria)
+# 3. CONTROL DE ACCESOS (GENERAL Y POR SECCIÓN)
 # ==========================================
+if 'acceso_app' not in st.session_state:
+    st.session_state.acceso_app = False # Bloqueo de la puerta principal
+
 if 'acceso_finanzas' not in st.session_state:
-    st.session_state.acceso_finanzas = "ninguno" # Puede ser: "ninguno", "admin", "observador"
+    st.session_state.acceso_finanzas = "ninguno" 
     
 if 'acceso_proyectos' not in st.session_state:
-    st.session_state.acceso_proyectos = "ninguno" # Puede ser: "ninguno", "admin", "observador"
+    st.session_state.acceso_proyectos = "ninguno" 
+
+# --- PANTALLA DE BLOQUEO PRINCIPAL ---
+if not st.session_state.acceso_app:
+    col_vacia1, col_centro, col_vacia2 = st.columns([1, 2, 1])
+    with col_centro:
+        st.image(LOGO_URL, use_container_width=True)
+        st.title("🔒 Portal Corporativo")
+        st.write("Ingresa las credenciales de la empresa para acceder a la plataforma.")
+        
+        u_gen = st.text_input("Usuario Corporativo")
+        p_gen = st.text_input("Clave de Acceso", type="password")
+        
+        if st.button("Entrar a la Plataforma", type="primary", use_container_width=True):
+            if u_gen == "voltify" and p_gen == "1234":
+                st.session_state.acceso_app = True
+                st.rerun()
+            else:
+                st.error("❌ Credenciales de empresa incorrectas.")
+    st.stop()
 
 # ==========================================
 # 4. CARGA INICIAL DE DATOS DESDE NUBE
@@ -102,7 +124,13 @@ def formato_clp(valor):
 # ==========================================
 st.sidebar.image(LOGO_URL, use_container_width=True)
 
-if st.sidebar.button("Cerrar Todas las Sesiones"):
+if st.sidebar.button("Salir de la Plataforma"):
+    st.session_state.acceso_app = False
+    st.session_state.acceso_finanzas = "ninguno"
+    st.session_state.acceso_proyectos = "ninguno"
+    st.rerun()
+
+if st.sidebar.button("Bloquear Secciones"):
     st.session_state.acceso_finanzas = "ninguno"
     st.session_state.acceso_proyectos = "ninguno"
     st.rerun()
@@ -117,27 +145,24 @@ menu = st.sidebar.radio("Navegación:", ["🏢 Finanzas", "📁 Proyectos", "�
 if menu == "🏢 Finanzas":
     st.title("🏢 Área de Finanzas (Fijos)")
     
-    # Si está bloqueado, mostrar pantalla de Login
     if st.session_state.acceso_finanzas == "ninguno":
-        st.info("🔒 Esta sección es confidencial. Ingresa tus credenciales de Finanzas.")
+        st.info("🔒 Ingresa credenciales para acceder a Finanzas.")
         col1, col2 = st.columns([1, 2])
         with col1:
             u_fin = st.text_input("Usuario (Finanzas)")
             p_fin = st.text_input("Clave", type="password", key="p_fin")
             if st.button("Desbloquear Finanzas", type="primary"):
-                if (u_fin == "master" and p_fin == "123") or (u_fin == "finanzas" and p_fin == "fin123"):
+                if (u_fin == "master" and p_fin == "123") or (u_fin == "admin_fin" and p_fin == "admin123"):
                     st.session_state.acceso_finanzas = "admin"
                     st.rerun()
-                elif u_fin == "visita" and p_fin == "abc":
+                elif (u_fin == "obs_fin" and p_fin == "obs123"):
                     st.session_state.acceso_finanzas = "observador"
                     st.rerun()
                 else:
                     st.error("Credenciales incorrectas.")
-    
-    # Si está desbloqueado, mostrar contenido
     else:
         if st.session_state.acceso_finanzas == "observador":
-            st.warning("👁️ MODO OBSERVADOR: Solo lectura activada.")
+            st.warning("👁️ MODO OBSERVADOR: Visualización de finanzas en modo lectura.")
             
         col1, col2 = st.columns(2)
         with col1:
@@ -168,27 +193,24 @@ if menu == "🏢 Finanzas":
 elif menu == "📁 Proyectos":
     st.title("📁 Gestión de Proyectos")
     
-    # Si está bloqueado, mostrar pantalla de Login
     if st.session_state.acceso_proyectos == "ninguno":
-        st.info("🔒 Sección protegida. Ingresa tus credenciales de Proyectos.")
+        st.info("🔒 Ingresa credenciales para acceder a Proyectos.")
         col1, col2 = st.columns([1, 2])
         with col1:
             u_proy = st.text_input("Usuario (Proyectos)")
             p_proy = st.text_input("Clave", type="password", key="p_proy")
             if st.button("Desbloquear Proyectos", type="primary"):
-                if (u_proy == "master" and p_proy == "123") or (u_proy == "proyectos" and p_proy == "obras123"):
+                if (u_proy == "master" and p_proy == "123") or (u_proy == "admin_proy" and p_proy == "admin123"):
                     st.session_state.acceso_proyectos = "admin"
                     st.rerun()
-                elif u_proy == "visita" and p_proy == "abc":
+                elif (u_proy == "obs_proy" and p_proy == "obs123"):
                     st.session_state.acceso_proyectos = "observador"
                     st.rerun()
                 else:
                     st.error("Credenciales incorrectas.")
-    
-    # Si está desbloqueado, mostrar contenido
     else:
         if st.session_state.acceso_proyectos == "observador":
-            st.warning("👁️ MODO OBSERVADOR: Solo lectura activada.")
+            st.warning("👁️ MODO OBSERVADOR: Visualización de proyectos en modo lectura.")
             
         if st.session_state.acceso_proyectos == "admin":
             with st.expander("➕ Crear Nueva Carpeta de Proyecto", expanded=False):
@@ -281,10 +303,9 @@ elif menu == "📁 Proyectos":
 elif menu == "📊 Balance Total":
     st.title("📊 Balance General de la Empresa")
     
-    # Se requiere acceso de Finanzas para ver el balance total de la empresa
     if st.session_state.acceso_finanzas == "ninguno":
         st.warning("🔒 Esta sección consolida información confidencial.")
-        st.info("Por favor, ve a la pestaña '🏢 Finanzas' e inicia sesión para desbloquear el Balance Total.")
+        st.info("Por favor, ve a la pestaña '🏢 Finanzas' e inicia sesión (Admin u Observador) para desbloquear el Balance Total.")
     else:
         ingresos = pd.to_numeric(st.session_state.proyectos_resumen["Cobro"], errors='coerce').sum() if not st.session_state.proyectos_resumen.empty else 0
         costos_proy = pd.to_numeric(st.session_state.proyectos_gastos["Monto"], errors='coerce').sum() if not st.session_state.proyectos_gastos.empty else 0
