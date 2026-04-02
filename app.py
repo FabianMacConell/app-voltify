@@ -7,7 +7,7 @@ import json
 # ==========================================
 # 1. CONFIGURACIÓN E IDENTIDAD VISUAL
 # ==========================================
-st.set_page_config(page_title="Panel Financiero", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Panel Financiero Voltify", page_icon="logo.png", layout="wide")
 
 ocultar_menu_estilo = """
             <style>
@@ -61,7 +61,7 @@ def cargar_datos(nombre_hoja, df_default):
 # 3. CONTROL DE ACCESOS (GENERAL Y POR SECCIÓN)
 # ==========================================
 if 'acceso_app' not in st.session_state:
-    st.session_state.acceso_app = False # Bloqueo de la puerta principal
+    st.session_state.acceso_app = False
 
 if 'acceso_finanzas' not in st.session_state:
     st.session_state.acceso_finanzas = "ninguno" 
@@ -74,7 +74,7 @@ if not st.session_state.acceso_app:
     col_vacia1, col_centro, col_vacia2 = st.columns([1, 2, 1])
     with col_centro:
         st.image(LOGO_URL, use_container_width=True)
-        st.title("🔒 Portal Corporativo")
+        st.title("Portal Corporativo")
         st.write("Ingresa las credenciales de la empresa para acceder a la plataforma.")
         
         u_gen = st.text_input("Usuario Corporativo")
@@ -85,7 +85,7 @@ if not st.session_state.acceso_app:
                 st.session_state.acceso_app = True
                 st.rerun()
             else:
-                st.error("❌ Credenciales de empresa incorrectas.")
+                st.error("Credenciales de empresa incorrectas.")
     st.stop()
 
 # ==========================================
@@ -136,17 +136,17 @@ if st.sidebar.button("Bloquear Secciones"):
     st.rerun()
 
 st.sidebar.divider()
-menu = st.sidebar.radio("Navegación:", ["🏢 Finanzas", "📁 Proyectos", "📊 Balance Total"])
+menu = st.sidebar.radio("Navegación:", ["Finanzas", "Proyectos", "Balance Total"])
 
 
 # ==========================================
 # PANTALLA 1: FINANZAS
 # ==========================================
-if menu == "🏢 Finanzas":
-    st.title("🏢 Área de Finanzas (Fijos)")
+if menu == "Finanzas":
+    st.title("Área de Finanzas (Fijos)")
     
     if st.session_state.acceso_finanzas == "ninguno":
-        st.info("🔒 Ingresa credenciales para acceder a Finanzas.")
+        st.info("Ingresa credenciales para acceder a Finanzas.")
         col1, col2 = st.columns([1, 2])
         with col1:
             u_fin = st.text_input("Usuario (Finanzas)")
@@ -162,39 +162,39 @@ if menu == "🏢 Finanzas":
                     st.error("Credenciales incorrectas.")
     else:
         if st.session_state.acceso_finanzas == "observador":
-            st.warning("👁️ MODO OBSERVADOR: Visualización de finanzas en modo lectura.")
+            st.warning("MODO OBSERVADOR: Visualización de finanzas en modo lectura.")
             
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("👥 Remuneraciones")
+            st.subheader("Remuneraciones")
             if st.session_state.acceso_finanzas == "admin":
                 res_sueldos = st.data_editor(st.session_state.sueldos, num_rows="dynamic", use_container_width=True, key="ed_sueldos")
-                if st.button("💾 Guardar Cambios Sueldos"):
+                if st.button("Guardar Cambios Sueldos"):
                     st.session_state.sueldos = res_sueldos
                     guardar_datos("Sueldos", res_sueldos)
-                    st.success("Guardado en la nube.")
+                    st.success("Guardado en la base de datos.")
             else:
                 st.dataframe(st.session_state.sueldos, use_container_width=True)
         
         with col2:
-            st.subheader("🏢 Gastos Fijos")
+            st.subheader("Gastos Fijos")
             if st.session_state.acceso_finanzas == "admin":
                 res_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True, key="ed_fijos")
-                if st.button("💾 Guardar Cambios Fijos"):
+                if st.button("Guardar Cambios Fijos"):
                     st.session_state.gastos_fijos = res_fijos
                     guardar_datos("Gastos_Fijos", res_fijos)
-                    st.success("Guardado en la nube.")
+                    st.success("Guardado en la base de datos.")
             else:
                 st.dataframe(st.session_state.gastos_fijos, use_container_width=True)
 
 # ==========================================
 # PANTALLA 2: PROYECTOS
 # ==========================================
-elif menu == "📁 Proyectos":
-    st.title("📁 Gestión de Proyectos")
+elif menu == "Proyectos":
+    st.title("Gestión de Proyectos")
     
     if st.session_state.acceso_proyectos == "ninguno":
-        st.info("🔒 Ingresa credenciales para acceder a Proyectos.")
+        st.info("Ingresa credenciales para acceder a Proyectos.")
         col1, col2 = st.columns([1, 2])
         with col1:
             u_proy = st.text_input("Usuario (Proyectos)")
@@ -210,10 +210,10 @@ elif menu == "📁 Proyectos":
                     st.error("Credenciales incorrectas.")
     else:
         if st.session_state.acceso_proyectos == "observador":
-            st.warning("👁️ MODO OBSERVADOR: Visualización de proyectos en modo lectura.")
+            st.warning("MODO OBSERVADOR: Visualización de proyectos en modo lectura.")
             
         if st.session_state.acceso_proyectos == "admin":
-            with st.expander("➕ Crear Nueva Carpeta de Proyecto", expanded=False):
+            with st.expander("Crear Nueva Carpeta de Proyecto", expanded=False):
                 colA, colB = st.columns(2)
                 nombre_p = colA.text_input("Nombre de la Obra o Proyecto")
                 empresa_p = colB.text_input("Nombre de la Empresa / Cliente")
@@ -237,7 +237,7 @@ elif menu == "📁 Proyectos":
 
         proyectos_lista = st.session_state.proyectos_resumen["Proyecto"].tolist()
         if proyectos_lista:
-            st.subheader("📂 Abrir Carpeta de Proyecto")
+            st.subheader("Abrir Carpeta de Proyecto")
             proyecto_seleccionado = st.selectbox("Selecciona un proyecto:", proyectos_lista)
             
             idx_proy = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seleccionado].index[0]
@@ -250,7 +250,7 @@ elif menu == "📁 Proyectos":
             col1, col2 = st.columns([1, 2])
             
             with col1:
-                st.write("### 💰 Ingreso (Cobro)")
+                st.write("### Ingreso (Cobro)")
                 if st.session_state.acceso_proyectos == "admin":
                     nuevo_cobro = st.number_input("Valor total cobrado (CLP):", min_value=0, value=int(cobro_actual), step=10000)
                 else:
@@ -258,7 +258,7 @@ elif menu == "📁 Proyectos":
                     nuevo_cobro = cobro_actual
 
             with col2:
-                st.write("### 💸 Gastos Desglosados")
+                st.write("### Gastos Desglosados")
                 if st.session_state.acceso_proyectos == "admin":
                     df_edit = df_gastos_proy[["Detalle_Gasto", "Monto"]]
                     df_gastos_editados = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True, key=f"gast_{proyecto_seleccionado}")
@@ -279,16 +279,16 @@ elif menu == "📁 Proyectos":
                 st.write("---")
                 col_save, col_del = st.columns(2)
                 with col_save:
-                    if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
+                    if st.button("Guardar Cambios", type="primary", use_container_width=True):
                         st.session_state.proyectos_resumen.at[idx_proy, "Cobro"] = nuevo_cobro
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         df_gastos_editados["Proyecto"] = proyecto_seleccionado
                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_gastos_editados], ignore_index=True)
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                        st.success("Guardado.")
+                        st.success("Guardado correctamente.")
                 with col_del:
-                    if st.button("🗑️ Eliminar Proyecto", use_container_width=True):
+                    if st.button("Eliminar Proyecto", use_container_width=True):
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado].reset_index(drop=True)
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado].reset_index(drop=True)
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
@@ -300,12 +300,12 @@ elif menu == "📁 Proyectos":
 # ==========================================
 # PANTALLA 3: BALANCE TOTAL
 # ==========================================
-elif menu == "📊 Balance Total":
-    st.title("📊 Balance General de la Empresa")
+elif menu == "Balance Total":
+    st.title("Balance General de la Empresa")
     
     if st.session_state.acceso_finanzas == "ninguno":
-        st.warning("🔒 Esta sección consolida información confidencial.")
-        st.info("Por favor, ve a la pestaña '🏢 Finanzas' e inicia sesión (Admin u Observador) para desbloquear el Balance Total.")
+        st.warning("Esta sección consolida información confidencial.")
+        st.info("Por favor, ve a la pestaña 'Finanzas' e inicia sesión para desbloquear el Balance Total.")
     else:
         ingresos = pd.to_numeric(st.session_state.proyectos_resumen["Cobro"], errors='coerce').sum() if not st.session_state.proyectos_resumen.empty else 0
         costos_proy = pd.to_numeric(st.session_state.proyectos_gastos["Monto"], errors='coerce').sum() if not st.session_state.proyectos_gastos.empty else 0
@@ -320,8 +320,8 @@ elif menu == "📊 Balance Total":
         
         st.write("---")
         if rentabilidad > 0:
-            st.success("✅ **La empresa es rentable.**")
+            st.success("La empresa es rentable.")
         elif rentabilidad < 0:
-            st.error(f"⚠️ **Alerta:** Los gastos superan a los ingresos por {formato_clp(abs(rentabilidad))}.")
+            st.error(f"Alerta: Los gastos superan a los ingresos por {formato_clp(abs(rentabilidad))}.")
         else:
-            st.info("⚖️ **Punto de equilibrio.**")
+            st.info("Punto de equilibrio.")
