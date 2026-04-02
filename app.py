@@ -198,4 +198,4 @@ elif menu == "📊 Balance Total":
     elif rentabilidad < 0:
         st.error("Alerta: Gastos superan ingresos.")
     else:
-        st.info("Punto de equilibrio.")replace
+        st.info("Punto de equilibrio.")
