@@ -122,4 +122,80 @@ menu = st.sidebar.radio("Navegación:", ["🏢 Finanzas", "📁 Proyectos", "�
 
 def formato_clp(valor):
     try:
-        return f"${int(valor):,.0f}".replace
+        return f"${int(valor):,.0f}".replace(",", ".")
+    except (ValueError, TypeError):
+        return "$0"
+
+# --- PANTALLA FINANZAS ---
+if menu == "🏢 Finanzas":
+    st.header("Área de Finanzas (Fijos)")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("👥 Remuneraciones")
+        if es_admin:
+            res_sueldos = st.data_editor(st.session_state.sueldos, num_rows="dynamic", use_container_width=True, key="ed_sueldos")
+            if st.button("💾 Guardar Cambios Sueldos"):
+                st.session_state.sueldos = res_sueldos
+                guardar_datos("Sueldos", res_sueldos)
+                st.success("Guardado en la nube.")
+        else:
+            st.dataframe(st.session_state.sueldos, use_container_width=True)
+    
+    with col2:
+        st.subheader("🏢 Gastos Fijos")
+        if es_admin:
+            res_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True, key="ed_fijos")
+            if st.button("💾 Guardar Cambios Fijos"):
+                st.session_state.gastos_fijos = res_fijos
+                guardar_datos("Gastos_Fijos", res_fijos)
+                st.success("Guardado en la nube.")
+        else:
+            st.dataframe(st.session_state.gastos_fijos, use_container_width=True)
+
+# --- PANTALLA PROYECTOS ---
+elif menu == "📁 Proyectos":
+    st.header("Gestión de Proyectos")
+    
+    if es_admin:
+        with st.expander("➕ Crear Nuevo Proyecto"):
+            nombre_p = st.text_input("Nombre del Trabajo")
+            cobro_p = st.number_input("Monto a cobrar", min_value=0)
+            gastos_p = st.number_input("Gastos estimados", min_value=0)
+            if st.button("Crear"):
+                nuevo_p = pd.DataFrame([{"Nombre": nombre_p, "Cobro_Total": cobro_p, "Gastos_Totales": gastos_p}])
+                st.session_state.proyectos_db = pd.concat([st.session_state.proyectos_db, nuevo_p], ignore_index=True)
+                guardar_datos("Proyectos", st.session_state.proyectos_db)
+                st.rerun()
+
+    st.subheader("🛠️ Listado de Proyectos Activos")
+    if es_admin:
+        res_proyectos = st.data_editor(st.session_state.proyectos_db, num_rows="dynamic", use_container_width=True, key="ed_proy")
+        if st.button("💾 Sincronizar Proyectos"):
+            st.session_state.proyectos_db = res_proyectos
+            guardar_datos("Proyectos", res_proyectos)
+            st.success("Proyectos actualizados.")
+    else:
+        st.dataframe(st.session_state.proyectos_db, use_container_width=True)
+
+# --- PANTALLA BALANCE ---
+elif menu == "📊 Balance Total":
+    st.header("Balance General")
+    
+    ingresos = st.session_state.proyectos_db["Cobro_Total"].sum() if not st.session_state.proyectos_db.empty else 0
+    costos_proy = st.session_state.proyectos_db["Gastos_Totales"].sum() if not st.session_state.proyectos_db.empty else 0
+    fijos = st.session_state.sueldos["Monto (CLP)"].sum() + st.session_state.gastos_fijos["Monto (CLP)"].sum()
+    
+    rentabilidad = ingresos - costos_proy - fijos
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("INGRESOS", formato_clp(ingresos))
+    c2.metric("EGRESOS TOTALES", formato_clp(costos_proy + fijos))
+    c3.metric("UTILIDAD NETA", formato_clp(rentabilidad))
+    
+    if rentabilidad > 0:
+        st.success("La empresa es rentable.")
+    elif rentabilidad < 0:
+        st.error("Alerta: Gastos superan ingresos.")
+    else:
+        st.info("Punto de equilibrio.")replace
