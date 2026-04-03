@@ -40,7 +40,6 @@ def obtener_o_crear_hoja(libro, nombre_hoja, columnas):
 def guardar_datos(nombre_hoja, df):
     try:
         libro = conectar_google_sheets()
-        # Convertimos todo a string o número básico para evitar errores con Google Sheets
         df_clean = df.fillna(0)
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
@@ -103,7 +102,6 @@ TASAS_AFP = {
     "Uno (10.69%)": 0.1069
 }
 
-# Carga de Nómina (Reemplaza la antigua tabla de sueldos simples)
 if 'nomina' not in st.session_state:
     df_nomina_base = pd.DataFrame([{
         "Trabajador": "Begoñia Mac-Conell Bacho",
@@ -139,7 +137,6 @@ def formato_clp(valor):
     except (ValueError, TypeError):
         return "$0"
 
-# Motor de cálculo de remuneraciones
 def calcular_liquidaciones(df):
     resultados = []
     costo_empresa_total = 0
@@ -148,12 +145,10 @@ def calcular_liquidaciones(df):
         sueldo_base = float(row['Sueldo_Base'])
         jornada = float(row['Jornada_Hrs'])
         
-        # Matemáticas base
         valor_dia = sueldo_base / 30
         valor_hora_normal = (sueldo_base / 30) * 28 / jornada if jornada > 0 else 0
         valor_hora_extra = valor_hora_normal * 1.5
         
-        # Ajustes del mes
         pago_extras = float(row['Horas_Extras']) * valor_hora_extra
         dcto_faltas = float(row['Dias_Falta']) * valor_dia
         dcto_atrasos = float(row['Horas_Atraso']) * valor_hora_normal
@@ -162,15 +157,13 @@ def calcular_liquidaciones(df):
         sueldo_imponible = sueldo_base + pago_extras - dcto_faltas - dcto_atrasos
         if sueldo_imponible < 0: sueldo_imponible = 0
         
-        # Leyes Sociales
         tasa_afp = TASAS_AFP.get(row['AFP'], 0.1144)
         dcto_afp = sueldo_imponible * tasa_afp
         dcto_fonasa = sueldo_imponible * 0.07
-        dcto_cesantia = sueldo_imponible * 0.006 # Contrato indefinido estandar
+        dcto_cesantia = sueldo_imponible * 0.006 
         
         sueldo_liquido = sueldo_imponible - dcto_afp - dcto_fonasa - dcto_cesantia + bonos_extra
         
-        # El costo real para la empresa es el imponible + bonos no imponibles
         costo_real_empresa = sueldo_imponible + bonos_extra 
         costo_empresa_total += costo_real_empresa
         
@@ -229,72 +222,77 @@ if menu == "Finanzas y Nómina":
         if st.session_state.acceso_finanzas == "observador":
             st.warning("MODO OBSERVADOR: Visualización en modo lectura.")
             
-        st.subheader("Control de Asistencia y Nómina")
+        # --- CREACIÓN DE PESTAÑAS (TABS) ---
+        tab_nomina, tab_fijos = st.tabs(["Nómina y Liquidaciones", "Gastos Fijos Operativos"])
         
-        if st.session_state.acceso_finanzas == "admin":
-            with st.expander("Ingresar Nuevo Trabajador", expanded=False):
-                colA, colB, colC = st.columns(3)
-                n_trabajador = colA.text_input("Nombre Completo")
-                n_cargo = colB.text_input("Cargo")
-                n_sueldo = colC.number_input("Sueldo Base Mensual", min_value=0, step=10000)
-                
-                colD, colE = st.columns(2)
-                n_jornada = colD.number_input("Horas Semanales (Jornada)", value=44, max_value=45)
-                n_afp = colE.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
-                
-                if st.button("Guardar Perfil"):
-                    if n_trabajador:
-                        nuevo_perfil = pd.DataFrame([{
-                            "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo,
-                            "Jornada_Hrs": n_jornada, "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0,
-                            "Horas_Extras": 0, "Bonos_No_Imponibles": 0
-                        }])
-                        st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
-                        guardar_datos("Nomina_Personal", st.session_state.nomina)
-                        st.success("Trabajador registrado.")
-                        st.rerun()
-
-            st.write("Modifique los días de falta, atrasos u horas extras en la tabla inferior:")
-            # Se permite editar la nómina directamente
-            df_nomina_edit = st.data_editor(
-                st.session_state.nomina,
-                column_config={
-                    "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
-                },
-                num_rows="dynamic", use_container_width=True, key="ed_nomina"
-            )
+        # --- PESTAÑA 1: NÓMINA ---
+        with tab_nomina:
+            st.subheader("Control de Asistencia y Nómina")
             
-            if st.button("Guardar Cambios de Nómina"):
-                st.session_state.nomina = df_nomina_edit
-                guardar_datos("Nomina_Personal", st.session_state.nomina)
-                st.success("Nómina y asistencia actualizadas en la base de datos.")
+            if st.session_state.acceso_finanzas == "admin":
+                with st.expander("Ingresar Nuevo Trabajador", expanded=False):
+                    colA, colB, colC = st.columns(3)
+                    n_trabajador = colA.text_input("Nombre Completo")
+                    n_cargo = colB.text_input("Cargo")
+                    n_sueldo = colC.number_input("Sueldo Base Mensual", min_value=0, step=10000)
+                    
+                    colD, colE = st.columns(2)
+                    n_jornada = colD.number_input("Horas Semanales (Jornada)", value=44, max_value=45)
+                    n_afp = colE.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
+                    
+                    if st.button("Guardar Perfil"):
+                        if n_trabajador:
+                            nuevo_perfil = pd.DataFrame([{
+                                "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo,
+                                "Jornada_Hrs": n_jornada, "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0,
+                                "Horas_Extras": 0, "Bonos_No_Imponibles": 0
+                            }])
+                            st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
+                            guardar_datos("Nomina_Personal", st.session_state.nomina)
+                            st.success("Trabajador registrado.")
+                            st.rerun()
+
+                st.write("Modifique los días de falta, atrasos u horas extras en la tabla inferior:")
+                df_nomina_edit = st.data_editor(
+                    st.session_state.nomina,
+                    column_config={
+                        "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
+                    },
+                    num_rows="dynamic", use_container_width=True, key="ed_nomina"
+                )
                 
-        else:
-            st.dataframe(st.session_state.nomina, use_container_width=True)
+                if st.button("Guardar Cambios de Nómina"):
+                    st.session_state.nomina = df_nomina_edit
+                    guardar_datos("Nomina_Personal", st.session_state.nomina)
+                    st.success("Nómina y asistencia actualizadas en la base de datos.")
+                    
+            else:
+                st.dataframe(st.session_state.nomina, use_container_width=True)
 
-        st.write("---")
-        st.subheader("Proyección de Liquidaciones de Sueldo")
-        # Generar cálculos automáticos
-        df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
-        
-        # Mostrar tabla de liquidaciones formateada
-        df_liq_format = df_liquidaciones.copy()
-        for col in ["Imponible Calculado", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
-            df_liq_format[col] = df_liq_format[col].apply(formato_clp)
+            st.write("---")
+            st.subheader("Proyección de Liquidaciones de Sueldo")
+            df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
             
-        st.dataframe(df_liq_format, use_container_width=True)
-        st.info(f"Costo Total Proyectado de Nómina para la Empresa: {formato_clp(total_nomina_empresa)}")
+            df_liq_format = df_liquidaciones.copy()
+            for col in ["Imponible Calculado", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
+                df_liq_format[col] = df_liq_format[col].apply(formato_clp)
+                
+            st.dataframe(df_liq_format, use_container_width=True)
+            st.info(f"Costo Total Proyectado de Nómina para la Empresa: {formato_clp(total_nomina_empresa)}")
 
-        st.write("---")
-        st.subheader("Gastos Fijos Operativos")
-        if st.session_state.acceso_finanzas == "admin":
-            res_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True, key="ed_fijos")
-            if st.button("Guardar Cambios Fijos"):
-                st.session_state.gastos_fijos = res_fijos
-                guardar_datos("Gastos_Fijos", res_fijos)
-                st.success("Gastos fijos actualizados.")
-        else:
-            st.dataframe(st.session_state.gastos_fijos, use_container_width=True)
+        # --- PESTAÑA 2: GASTOS FIJOS ---
+        with tab_fijos:
+            st.subheader("Gastos Fijos Operativos")
+            st.write("Administre aquí los costos fijos mensuales de la empresa (arriendos, servicios, etc.).")
+            
+            if st.session_state.acceso_finanzas == "admin":
+                res_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True, key="ed_fijos")
+                if st.button("Guardar Cambios Fijos"):
+                    st.session_state.gastos_fijos = res_fijos
+                    guardar_datos("Gastos_Fijos", res_fijos)
+                    st.success("Gastos fijos actualizados en la base de datos.")
+            else:
+                st.dataframe(st.session_state.gastos_fijos, use_container_width=True)
 
 # ==========================================
 # PANTALLA 2: PROYECTOS
@@ -416,14 +414,10 @@ elif menu == "Balance Total":
         st.warning("Esta sección consolida información confidencial.")
         st.info("Por favor, ve a la pestaña 'Finanzas y Nómina' e inicia sesión para desbloquear el Balance Total.")
     else:
-        # Calcular ingresos y egresos de proyectos
         ingresos = pd.to_numeric(st.session_state.proyectos_resumen["Cobro"], errors='coerce').sum() if not st.session_state.proyectos_resumen.empty else 0
         costos_proy = pd.to_numeric(st.session_state.proyectos_gastos["Monto"], errors='coerce').sum() if not st.session_state.proyectos_gastos.empty else 0
         
-        # Calcular Costo Real de Nómina (Sueldo Imponible + Bonos No Imponibles de todos los trabajadores)
         df_liq, costo_nomina_total = calcular_liquidaciones(st.session_state.nomina)
-        
-        # Gastos Fijos
         fijos = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
         
         egresos_totales = costos_proy + costo_nomina_total + fijos
