@@ -9,26 +9,10 @@ import json
 # ==========================================
 st.set_page_config(page_title="Panel Financiero Voltify", page_icon="logo.png", layout="wide")
 
-# ESCUDO VISUAL REFORZADO PARA OCULTAR INTERFAZ DE STREAMLIT Y GITHUB
 ocultar_menu_estilo = """
             <style>
-            /* 1. Ocultar bloque superior derecho completo (Toolbar, Fork, GitHub, 3 puntos) */
-            [data-testid="stHeaderActionElements"] {display: none !important;}
-            [data-testid="stToolbar"] {display: none !important;}
-            
-            /* 2. Ocultar badges específicos de Streamlit Community Cloud */
-            .viewerBadge_container {display: none !important;}
-            #viewerBadge {display: none !important;}
-            iframe[src*="badge"] {display: none !important;}
-            
-            /* 3. Ocultar botón de Deploy explícito */
-            .stDeployButton {display: none !important;}
-            
-            /* 4. Ocultar marca de agua inferior (Made with Streamlit) */
-            footer {display: none !important;}
-            
-            /* 5. Ocultar la línea de colores de decoración en el borde superior */
-            [data-testid="stDecoration"] {display: none !important;}
+            [data-testid="stHeaderActionElements"] {visibility: hidden;}
+            footer {visibility: hidden;}
             </style>
             """
 st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
@@ -238,7 +222,6 @@ if menu == "Finanzas y Nómina":
         if st.session_state.acceso_finanzas == "observador":
             st.warning("MODO OBSERVADOR: Visualización en modo lectura.")
             
-        # --- CREACIÓN DE PESTAÑAS (TABS) ---
         tab_nomina, tab_fijos = st.tabs(["Nómina y Liquidaciones", "Gastos Fijos Operativos"])
         
         # --- PESTAÑA 1: NÓMINA ---
@@ -251,6 +234,7 @@ if menu == "Finanzas y Nómina":
                     n_trabajador = colA.text_input("Nombre Completo")
                     n_cargo = colB.text_input("Cargo")
                     n_sueldo = colC.number_input("Sueldo Base Mensual", min_value=0, step=10000)
+                    colC.caption(f"Valor a registrar: **{formato_clp(n_sueldo)}**") # Confirmación visual
                     
                     colD, colE = st.columns(2)
                     n_jornada = colD.number_input("Horas Semanales (Jornada)", value=44, max_value=45)
@@ -269,9 +253,12 @@ if menu == "Finanzas y Nómina":
                             st.rerun()
 
                 st.write("Modifique los días de falta, atrasos u horas extras en la tabla inferior:")
+                
                 df_nomina_edit = st.data_editor(
                     st.session_state.nomina,
                     column_config={
+                        "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, step=10000),
+                        "Bonos_No_Imponibles": st.column_config.NumberColumn("Bonos Extra", min_value=0, step=10000),
                         "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
                     },
                     num_rows="dynamic", use_container_width=True, key="ed_nomina"
@@ -283,7 +270,11 @@ if menu == "Finanzas y Nómina":
                     st.success("Nómina y asistencia actualizadas en la base de datos.")
                     
             else:
-                st.dataframe(st.session_state.nomina, use_container_width=True)
+                # Vista de observador formateada
+                df_nomina_view = st.session_state.nomina.copy()
+                df_nomina_view["Sueldo_Base"] = pd.to_numeric(df_nomina_view["Sueldo_Base"], errors='coerce').apply(formato_clp)
+                df_nomina_view["Bonos_No_Imponibles"] = pd.to_numeric(df_nomina_view["Bonos_No_Imponibles"], errors='coerce').apply(formato_clp)
+                st.dataframe(df_nomina_view, use_container_width=True)
 
             st.write("---")
             st.subheader("Proyección de Liquidaciones de Sueldo")
@@ -302,13 +293,21 @@ if menu == "Finanzas y Nómina":
             st.write("Administre aquí los costos fijos mensuales de la empresa (arriendos, servicios, etc.).")
             
             if st.session_state.acceso_finanzas == "admin":
-                res_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True, key="ed_fijos")
+                res_fijos = st.data_editor(
+                    st.session_state.gastos_fijos, 
+                    column_config={
+                        "Monto (CLP)": st.column_config.NumberColumn("Monto (CLP)", min_value=0, step=1000)
+                    },
+                    num_rows="dynamic", use_container_width=True, key="ed_fijos"
+                )
                 if st.button("Guardar Cambios Fijos"):
                     st.session_state.gastos_fijos = res_fijos
                     guardar_datos("Gastos_Fijos", res_fijos)
                     st.success("Gastos fijos actualizados en la base de datos.")
             else:
-                st.dataframe(st.session_state.gastos_fijos, use_container_width=True)
+                df_fijos_view = st.session_state.gastos_fijos.copy()
+                df_fijos_view["Monto (CLP)"] = pd.to_numeric(df_fijos_view["Monto (CLP)"], errors='coerce').apply(formato_clp)
+                st.dataframe(df_fijos_view, use_container_width=True)
 
 # ==========================================
 # PANTALLA 2: PROYECTOS
@@ -376,6 +375,7 @@ elif menu == "Proyectos":
                 st.write("### Ingreso (Cobro)")
                 if st.session_state.acceso_proyectos == "admin":
                     nuevo_cobro = st.number_input("Valor total cobrado (CLP):", min_value=0, value=int(cobro_actual), step=10000)
+                    st.caption(f"Valor a registrar: **{formato_clp(nuevo_cobro)}**") # Confirmación visual
                 else:
                     st.info(f"Cobro Total: {formato_clp(cobro_actual)}")
                     nuevo_cobro = cobro_actual
@@ -384,9 +384,17 @@ elif menu == "Proyectos":
                 st.write("### Gastos Desglosados")
                 if st.session_state.acceso_proyectos == "admin":
                     df_edit = df_gastos_proy[["Detalle_Gasto", "Monto"]]
-                    df_gastos_editados = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True, key=f"gast_{proyecto_seleccionado}")
+                    df_gastos_editados = st.data_editor(
+                        df_edit, 
+                        column_config={
+                            "Monto": st.column_config.NumberColumn("Monto", min_value=0, step=1000)
+                        },
+                        num_rows="dynamic", use_container_width=True, key=f"gast_{proyecto_seleccionado}"
+                    )
                 else:
-                    st.dataframe(df_gastos_proy[["Detalle_Gasto", "Monto"]], use_container_width=True)
+                    df_gastos_view = df_gastos_proy[["Detalle_Gasto", "Monto"]].copy()
+                    df_gastos_view["Monto"] = pd.to_numeric(df_gastos_view["Monto"], errors='coerce').apply(formato_clp)
+                    st.dataframe(df_gastos_view, use_container_width=True)
                     df_gastos_editados = df_gastos_proy[["Detalle_Gasto", "Monto"]]
 
             gastos_totales = pd.to_numeric(df_gastos_editados["Monto"], errors='coerce').sum()
