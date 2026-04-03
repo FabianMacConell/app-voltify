@@ -29,11 +29,21 @@ LOGO_URL = "logo.png"
 # 2. CONEXIÓN A GOOGLE SHEETS
 # ==========================================
 def conectar_google_sheets():
-    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds_dict = json.loads(st.secrets["google_credentials"])
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-    client = gspread.authorize(creds)
-    return client.open("Base de Datos Voltify")
+    try:
+        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        secreto = st.secrets["google_credentials"]
+        
+        if isinstance(secreto, str):
+            creds_dict = json.loads(secreto.strip())
+        else:
+            creds_dict = dict(secreto)
+            
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+        return client.open("Base de Datos Voltify")
+    except Exception as e:
+        st.error(f"🚨 ERROR CRÍTICO DE CONEXIÓN: {e}")
+        st.stop()
 
 def obtener_o_crear_hoja(libro, nombre_hoja, columnas):
     try:
@@ -53,7 +63,7 @@ def guardar_datos(nombre_hoja, df):
         hoja.clear()
         hoja.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
     except Exception as e:
-        st.error(f"Error al guardar: {e}")
+        st.error(f"Error al guardar datos: {e}")
 
 def cargar_datos(nombre_hoja, df_default):
     try:
@@ -108,7 +118,7 @@ if 'nomina' not in st.session_state:
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
 
-# --- FORZADOR INCONDICIONAL DE ACTUALIZACIÓN ---
+# Forzador agresivo de actualización de columnas
 cambio_necesario = False
 if 'nomina' in st.session_state:
     if 'Colacion' not in st.session_state.nomina.columns:
@@ -208,7 +218,6 @@ def calcular_liquidaciones(df):
 # ==========================================
 st.sidebar.image(LOGO_URL, use_container_width=True)
 
-# NUEVO BOTÓN PARA FORZAR ACTUALIZACIÓN
 if st.sidebar.button("🔄 Sincronizar Base de Datos", use_container_width=True):
     for key in list(st.session_state.keys()):
         if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']:
