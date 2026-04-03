@@ -47,7 +47,6 @@ def guardar_datos(nombre_hoja, df):
     try:
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
-        # Forzar formato texto en gratificación para evitar errores de Google Sheets
         if 'Gratificacion' in df_clean.columns:
             df_clean['Gratificacion'] = df_clean['Gratificacion'].astype(str)
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
@@ -108,18 +107,25 @@ if 'nomina' not in st.session_state:
         "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Colacion": 0, "Movilizacion": 0
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
-    
-    # FORZADOR DE ACTUALIZACIÓN DE COLUMNAS PARA GOOGLE SHEETS
-    cambio_necesario = False
+
+# --- FORZADOR INCONDICIONAL DE ACTUALIZACIÓN ---
+cambio_necesario = False
+if 'nomina' in st.session_state:
+    if 'Colacion' not in st.session_state.nomina.columns:
+        st.session_state.nomina['Colacion'] = 0
+        cambio_necesario = True
+    if 'Movilizacion' not in st.session_state.nomina.columns:
+        st.session_state.nomina['Movilizacion'] = 0
+        cambio_necesario = True
+    if 'Gratificacion' not in st.session_state.nomina.columns:
+        st.session_state.nomina['Gratificacion'] = "Tope Legal Mensual"
+        cambio_necesario = True
     if 'Bonos_No_Imponibles' in st.session_state.nomina.columns:
         st.session_state.nomina = st.session_state.nomina.drop(columns=['Bonos_No_Imponibles'])
         cambio_necesario = True
-    for col in df_nomina_base.columns:
-        if col not in st.session_state.nomina.columns:
-            st.session_state.nomina[col] = df_nomina_base[col][0]
-            cambio_necesario = True
+        
     if cambio_necesario:
-        guardar_datos("Nomina_Personal", st.session_state.nomina) # Obliga a Google a aceptar el nuevo formato
+        guardar_datos("Nomina_Personal", st.session_state.nomina)
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "Prioridad emergencias", "Monto (CLP)": 50000}])
@@ -162,7 +168,6 @@ def calcular_liquidaciones(df):
         valor_hora_normal = (sueldo_base / 30) * 28 / jornada if jornada > 0 else 0
         valor_hora_extra = valor_hora_normal * 1.5
         
-        # Gratificación
         tipo_grati = str(row.get('Gratificacion', 'Sin Gratificación'))
         if tipo_grati == "Tope Legal Mensual":
             grati_monto = min(sueldo_base * 0.25, 197917)
@@ -202,6 +207,15 @@ def calcular_liquidaciones(df):
 # 5. BARRA LATERAL FIJA
 # ==========================================
 st.sidebar.image(LOGO_URL, use_container_width=True)
+
+# NUEVO BOTÓN PARA FORZAR ACTUALIZACIÓN
+if st.sidebar.button("🔄 Sincronizar Base de Datos", use_container_width=True):
+    for key in list(st.session_state.keys()):
+        if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']:
+            del st.session_state[key]
+    st.rerun()
+
+st.sidebar.divider()
 
 if st.sidebar.button("Salir de la Plataforma"):
     st.session_state.acceso_app = False
