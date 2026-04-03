@@ -129,7 +129,6 @@ def formato_clp(valor):
     except (ValueError, TypeError):
         return "$0"
 
-# --- Función Inteligente para Auto-Formato de Inputs ---
 def formatear_input(llave):
     val = str(st.session_state[llave]).replace(".", "").replace(",", "").replace("$", "").replace(" ", "").strip()
     try:
@@ -221,7 +220,6 @@ if menu == "Finanzas y Nómina":
                     n_trabajador = colA.text_input("Nombre Completo")
                     n_cargo = colB.text_input("Cargo")
                     
-                    # --- Input con Auto-Formato ---
                     if 'input_sueldo_base' not in st.session_state:
                         st.session_state['input_sueldo_base'] = "0"
                     colC.text_input("Sueldo Base Mensual", key="input_sueldo_base", on_change=formatear_input, kwargs={'llave': 'input_sueldo_base'}, help="Escribe de corrido y presiona Enter")
@@ -236,14 +234,20 @@ if menu == "Finanzas y Nómina":
                             nuevo_perfil = pd.DataFrame([{"Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, "Jornada_Hrs": n_jornada, "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Bonos_No_Imponibles": 0}])
                             st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
                             guardar_datos("Nomina_Personal", st.session_state.nomina)
-                            st.session_state['input_sueldo_base'] = "0" # Reinicia la caja
+                            st.session_state['input_sueldo_base'] = "0"
                             st.success("Trabajador registrado.")
                             st.rerun()
 
                 st.write("Modifique los días de falta, atrasos u horas extras en la tabla inferior:")
+                
+                # AQUI ESTÁ EL FORMATO "%,d" PARA SEPARADORES EN LA TABLA
                 df_nomina_edit = st.data_editor(
                     st.session_state.nomina,
-                    column_config={"Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, step=10000), "Bonos_No_Imponibles": st.column_config.NumberColumn("Bonos Extra", min_value=0, step=10000), "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys()))},
+                    column_config={
+                        "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, step=10000, format="%,d"),
+                        "Bonos_No_Imponibles": st.column_config.NumberColumn("Bonos Extra", min_value=0, step=10000, format="%,d"),
+                        "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
+                    },
                     num_rows="dynamic", use_container_width=True, key="ed_nomina"
                 )
                 if st.button("Guardar Cambios de Nómina"):
@@ -268,7 +272,15 @@ if menu == "Finanzas y Nómina":
         with tab_fijos:
             st.subheader("Gastos Fijos Operativos")
             if st.session_state.acceso_finanzas == "admin":
-                res_fijos = st.data_editor(st.session_state.gastos_fijos, column_config={"Monto (CLP)": st.column_config.NumberColumn("Monto (CLP)", min_value=0, step=1000)}, num_rows="dynamic", use_container_width=True, key="ed_fijos")
+                
+                # FORMATO APLICADO A LA TABLA DE GASTOS FIJOS
+                res_fijos = st.data_editor(
+                    st.session_state.gastos_fijos, 
+                    column_config={
+                        "Monto (CLP)": st.column_config.NumberColumn("Monto (CLP)", min_value=0, step=1000, format="%,d")
+                    }, 
+                    num_rows="dynamic", use_container_width=True, key="ed_fijos"
+                )
                 if st.button("Guardar Cambios Fijos"):
                     st.session_state.gastos_fijos = res_fijos
                     guardar_datos("Gastos_Fijos", res_fijos)
@@ -337,15 +349,12 @@ elif menu == "Proyectos":
             with col1:
                 st.write("### Ingreso (Cobro)")
                 if st.session_state.acceso_proyectos == "admin":
-                    
-                    # --- Input con Auto-Formato (Se regenera según el proyecto) ---
                     llave_cobro = f"cobro_{proyecto_seleccionado}"
                     if llave_cobro not in st.session_state:
                         st.session_state[llave_cobro] = f"{int(cobro_actual):,}".replace(",", ".")
                         
                     st.text_input("Valor total cobrado (CLP):", key=llave_cobro, on_change=formatear_input, kwargs={'llave': llave_cobro}, help="Escribe de corrido y presiona Enter")
                     nuevo_cobro = float(st.session_state[llave_cobro].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-                    
                 else:
                     st.info(f"Cobro Total: {formato_clp(cobro_actual)}")
                     nuevo_cobro = cobro_actual
@@ -353,7 +362,15 @@ elif menu == "Proyectos":
             with col2:
                 st.write("### Gastos Desglosados")
                 if st.session_state.acceso_proyectos == "admin":
-                    df_gastos_editados = st.data_editor(df_gastos_proy[["Detalle_Gasto", "Monto"]], column_config={"Monto": st.column_config.NumberColumn("Monto", min_value=0, step=1000)}, num_rows="dynamic", use_container_width=True, key=f"gast_{proyecto_seleccionado}")
+                    
+                    # FORMATO APLICADO A LA TABLA DE GASTOS DE PROYECTO
+                    df_gastos_editados = st.data_editor(
+                        df_gastos_proy[["Detalle_Gasto", "Monto"]], 
+                        column_config={
+                            "Monto": st.column_config.NumberColumn("Monto", min_value=0, step=1000, format="%,d")
+                        }, 
+                        num_rows="dynamic", use_container_width=True, key=f"gast_{proyecto_seleccionado}"
+                    )
                 else:
                     df_gastos_view = df_gastos_proy[["Detalle_Gasto", "Monto"]].copy()
                     df_gastos_view["Monto"] = pd.to_numeric(df_gastos_view["Monto"], errors='coerce').apply(formato_clp)
