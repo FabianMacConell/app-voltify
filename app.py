@@ -47,6 +47,9 @@ def guardar_datos(nombre_hoja, df):
     try:
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
+        # Forzar que Gratificación sea string
+        if 'Gratificacion' in df_clean.columns:
+            df_clean['Gratificacion'] = df_clean['Gratificacion'].astype(str)
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
         hoja.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
@@ -67,14 +70,9 @@ def cargar_datos(nombre_hoja, df_default):
 # ==========================================
 # 3. CONTROL DE ACCESOS
 # ==========================================
-if 'acceso_app' not in st.session_state:
-    st.session_state.acceso_app = False
-
-if 'acceso_finanzas' not in st.session_state:
-    st.session_state.acceso_finanzas = "ninguno" 
-    
-if 'acceso_proyectos' not in st.session_state:
-    st.session_state.acceso_proyectos = "ninguno" 
+if 'acceso_app' not in st.session_state: st.session_state.acceso_app = False
+if 'acceso_finanzas' not in st.session_state: st.session_state.acceso_finanzas = "ninguno" 
+if 'acceso_proyectos' not in st.session_state: st.session_state.acceso_proyectos = "ninguno" 
 
 if not st.session_state.acceso_app:
     col_vacia1, col_centro, col_vacia2 = st.columns([1, 2, 1])
@@ -103,13 +101,20 @@ TASAS_AFP = {
     "Uno (10.69%)": 0.1069
 }
 
+# --- Carga de Datos y Migración Automática de Columnas ---
 if 'nomina' not in st.session_state:
     df_nomina_base = pd.DataFrame([{
         "Trabajador": "Begoñia Mac-Conell Bacho", "Cargo": "Jefa de administracion y finanzas",
-        "Sueldo_Base": 850000, "Jornada_Hrs": 44, "AFP": "Habitat (11.27%)",
-        "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Bonos_No_Imponibles": 0
+        "Sueldo_Base": 850000, "Jornada_Hrs": 44, "Gratificacion": "Tope Legal Mensual", "AFP": "Habitat (11.27%)",
+        "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Colacion": 0, "Movilizacion": 0
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
+    
+    # Parche inteligente por si la hoja de Google Sheets tiene la versión anterior
+    if 'Colacion' not in st.session_state.nomina.columns: st.session_state.nomina['Colacion'] = 0
+    if 'Movilizacion' not in st.session_state.nomina.columns: st.session_state.nomina['Movilizacion'] = 0
+    if 'Gratificacion' not in st.session_state.nomina.columns: st.session_state.nomina['Gratificacion'] = "Tope Legal Mensual"
+    if 'Bonos_No_Imponibles' in st.session_state.nomina.columns: st.session_state.nomina.drop(columns=['Bonos_No_Imponibles'], inplace=True)
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "Prioridad emergencias", "Monto (CLP)": 50000}])
@@ -144,24 +149,48 @@ def calcular_liquidaciones(df):
         sueldo_base = float(row['Sueldo_Base'])
         jornada = float(row['Jornada_Hrs'])
         
+        # Matemáticas base para descuentos
         valor_dia = sueldo_base / 30
         valor_hora_normal = (sueldo_base / 30) * 28 / jornada if jornada > 0 else 0
         valor_hora_extra = valor_hora_normal * 1.5
         
-        sueldo_imponible = sueldo_base + (float(row['Horas_Extras']) * valor_hora_extra) - (float(row['Dias_Falta']) * valor_dia) - (float(row['Horas_Atraso']) * valor_hora_normal)
+        # Calcular Gratificación
+        tipo_grati = str(row.get('Gratificacion', 'Sin Gratificación'))
+        if tipo_grati == "Tope Legal Mensual":
+            # Tope legal en Chile aprox (4.75 ingresos minimos / 12)
+            grati_monto = min(sueldo_base * 0.25, 197917)
+        elif tipo_grati == "25% del Sueldo (Sin Tope)":
+            grati_monto = sueldo_base * 0.25
+        else:
+            grati_monto = 0
+            
+        # Calcular Imponible
+        pago_extras = float(row.get('Horas_Extras', 0)) * valor_hora_extra
+        dcto_faltas = float(row.get('Dias_Falta', 0)) * valor_dia
+        dcto_atrasos = float(row.get('Horas_Atraso', 0)) * valor_hora_normal
+        
+        sueldo_imponible = sueldo_base + grati_monto + pago_extras - dcto_faltas - dcto_atrasos
         if sueldo_imponible < 0: sueldo_imponible = 0
         
+        # Descuentos Legales
         dcto_afp = sueldo_imponible * TASAS_AFP.get(row['AFP'], 0.1144)
         dcto_fonasa = sueldo_imponible * 0.07
         dcto_cesantia = sueldo_imponible * 0.006 
         
-        sueldo_liquido = sueldo_imponible - dcto_afp - dcto_fonasa - dcto_cesantia + float(row['Bonos_No_Imponibles'])
-        costo_real_empresa = sueldo_imponible + float(row['Bonos_No_Imponibles'])
+        # Haberes No Imponibles
+        colacion = float(row.get('Colacion', 0))
+        movilizacion = float(row.get('Movilizacion', 0))
+        no_imponibles = colacion + movilizacion
+        
+        # Liquido Final
+        sueldo_liquido = sueldo_imponible - dcto_afp - dcto_fonasa - dcto_cesantia + no_imponibles
+        costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
         
         resultados.append({
             "Trabajador": row['Trabajador'], "Cargo": row['Cargo'],
-            "Imponible Calculado": sueldo_imponible, "Descuentos Ley": dcto_afp + dcto_fonasa + dcto_cesantia,
+            "Imponible Calculado": sueldo_imponible, "Haberes No Imponibles": no_imponibles, 
+            "Descuentos Ley": dcto_afp + dcto_fonasa + dcto_cesantia,
             "Líquido a Pagar": sueldo_liquido, "Costo Empresa": costo_real_empresa
         })
     return pd.DataFrame(resultados), costo_empresa_total
@@ -220,32 +249,49 @@ if menu == "Finanzas y Nómina":
                     n_trabajador = colA.text_input("Nombre Completo")
                     n_cargo = colB.text_input("Cargo")
                     
-                    if 'input_sueldo_base' not in st.session_state:
-                        st.session_state['input_sueldo_base'] = "0"
+                    if 'input_sueldo_base' not in st.session_state: st.session_state['input_sueldo_base'] = "0"
                     colC.text_input("Sueldo Base Mensual", key="input_sueldo_base", on_change=formatear_input, kwargs={'llave': 'input_sueldo_base'}, help="Escribe de corrido y presiona Enter")
                     n_sueldo = float(st.session_state['input_sueldo_base'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                     
-                    colD, colE = st.columns(2)
+                    colD, colE, colF = st.columns(3)
                     n_jornada = colD.number_input("Horas Semanales (Jornada)", value=44, max_value=45)
-                    n_afp = colE.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
+                    n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"])
+                    n_afp = colF.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
+                    
+                    colG, colH = st.columns(2)
+                    if 'input_colacion' not in st.session_state: st.session_state['input_colacion'] = "0"
+                    if 'input_movilizacion' not in st.session_state: st.session_state['input_movilizacion'] = "0"
+                    
+                    colG.text_input("Bono Colación (Opcional)", key="input_colacion", on_change=formatear_input, kwargs={'llave': 'input_colacion'})
+                    n_cola = float(st.session_state['input_colacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                    
+                    colH.text_input("Bono Movilización (Opcional)", key="input_movilizacion", on_change=formatear_input, kwargs={'llave': 'input_movilizacion'})
+                    n_movi = float(st.session_state['input_movilizacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                     
                     if st.button("Guardar Perfil"):
                         if n_trabajador:
-                            nuevo_perfil = pd.DataFrame([{"Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, "Jornada_Hrs": n_jornada, "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Bonos_No_Imponibles": 0}])
+                            nuevo_perfil = pd.DataFrame([{
+                                "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
+                                "Jornada_Hrs": n_jornada, "Gratificacion": n_grati, "AFP": n_afp, 
+                                "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
+                                "Colacion": n_cola, "Movilizacion": n_movi
+                            }])
                             st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
                             guardar_datos("Nomina_Personal", st.session_state.nomina)
                             st.session_state['input_sueldo_base'] = "0"
-                            st.success("Trabajador registrado.")
+                            st.session_state['input_colacion'] = "0"
+                            st.session_state['input_movilizacion'] = "0"
+                            st.success("Trabajador registrado exitosamente.")
                             st.rerun()
 
-                st.write("Modifique los días de falta, atrasos u horas extras en la tabla inferior:")
-                
-                # AQUI ESTÁ EL FORMATO "%,d" PARA SEPARADORES EN LA TABLA
+                st.write("Modifique datos, asistencia y bonos en la tabla interactiva:")
                 df_nomina_edit = st.data_editor(
                     st.session_state.nomina,
                     column_config={
                         "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, step=10000, format="%,d"),
-                        "Bonos_No_Imponibles": st.column_config.NumberColumn("Bonos Extra", min_value=0, step=10000, format="%,d"),
+                        "Colacion": st.column_config.NumberColumn("Colación", min_value=0, step=5000, format="%,d"),
+                        "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, step=5000, format="%,d"),
+                        "Gratificacion": st.column_config.SelectboxColumn("Gratificación", options=["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"]),
                         "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
                     },
                     num_rows="dynamic", use_container_width=True, key="ed_nomina"
@@ -253,18 +299,18 @@ if menu == "Finanzas y Nómina":
                 if st.button("Guardar Cambios de Nómina"):
                     st.session_state.nomina = df_nomina_edit
                     guardar_datos("Nomina_Personal", st.session_state.nomina)
-                    st.success("Nómina y asistencia actualizadas.")
+                    st.success("Nómina y asistencia actualizadas en la base de datos.")
             else:
                 df_nomina_view = st.session_state.nomina.copy()
-                df_nomina_view["Sueldo_Base"] = pd.to_numeric(df_nomina_view["Sueldo_Base"], errors='coerce').apply(formato_clp)
-                df_nomina_view["Bonos_No_Imponibles"] = pd.to_numeric(df_nomina_view["Bonos_No_Imponibles"], errors='coerce').apply(formato_clp)
+                for col in ["Sueldo_Base", "Colacion", "Movilizacion"]:
+                    df_nomina_view[col] = pd.to_numeric(df_nomina_view[col], errors='coerce').apply(formato_clp)
                 st.dataframe(df_nomina_view, use_container_width=True)
 
             st.write("---")
             st.subheader("Proyección de Liquidaciones de Sueldo")
             df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
             df_liq_format = df_liquidaciones.copy()
-            for col in ["Imponible Calculado", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
+            for col in ["Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
                 df_liq_format[col] = df_liq_format[col].apply(formato_clp)
             st.dataframe(df_liq_format, use_container_width=True)
             st.info(f"Costo Total Proyectado de Nómina para la Empresa: {formato_clp(total_nomina_empresa)}")
@@ -272,15 +318,7 @@ if menu == "Finanzas y Nómina":
         with tab_fijos:
             st.subheader("Gastos Fijos Operativos")
             if st.session_state.acceso_finanzas == "admin":
-                
-                # FORMATO APLICADO A LA TABLA DE GASTOS FIJOS
-                res_fijos = st.data_editor(
-                    st.session_state.gastos_fijos, 
-                    column_config={
-                        "Monto (CLP)": st.column_config.NumberColumn("Monto (CLP)", min_value=0, step=1000, format="%,d")
-                    }, 
-                    num_rows="dynamic", use_container_width=True, key="ed_fijos"
-                )
+                res_fijos = st.data_editor(st.session_state.gastos_fijos, column_config={"Monto (CLP)": st.column_config.NumberColumn("Monto (CLP)", min_value=0, step=1000, format="%,d")}, num_rows="dynamic", use_container_width=True, key="ed_fijos")
                 if st.button("Guardar Cambios Fijos"):
                     st.session_state.gastos_fijos = res_fijos
                     guardar_datos("Gastos_Fijos", res_fijos)
@@ -362,13 +400,9 @@ elif menu == "Proyectos":
             with col2:
                 st.write("### Gastos Desglosados")
                 if st.session_state.acceso_proyectos == "admin":
-                    
-                    # FORMATO APLICADO A LA TABLA DE GASTOS DE PROYECTO
                     df_gastos_editados = st.data_editor(
                         df_gastos_proy[["Detalle_Gasto", "Monto"]], 
-                        column_config={
-                            "Monto": st.column_config.NumberColumn("Monto", min_value=0, step=1000, format="%,d")
-                        }, 
+                        column_config={"Monto": st.column_config.NumberColumn("Monto", min_value=0, step=1000, format="%,d")}, 
                         num_rows="dynamic", use_container_width=True, key=f"gast_{proyecto_seleccionado}"
                     )
                 else:
