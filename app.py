@@ -47,7 +47,7 @@ def guardar_datos(nombre_hoja, df):
     try:
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
-        # Forzar que Gratificación sea string
+        # Forzar formato texto en gratificación para evitar errores de Google Sheets
         if 'Gratificacion' in df_clean.columns:
             df_clean['Gratificacion'] = df_clean['Gratificacion'].astype(str)
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
@@ -101,7 +101,6 @@ TASAS_AFP = {
     "Uno (10.69%)": 0.1069
 }
 
-# --- Carga de Datos y Migración Automática de Columnas ---
 if 'nomina' not in st.session_state:
     df_nomina_base = pd.DataFrame([{
         "Trabajador": "Begoñia Mac-Conell Bacho", "Cargo": "Jefa de administracion y finanzas",
@@ -110,11 +109,17 @@ if 'nomina' not in st.session_state:
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
     
-    # Parche inteligente por si la hoja de Google Sheets tiene la versión anterior
-    if 'Colacion' not in st.session_state.nomina.columns: st.session_state.nomina['Colacion'] = 0
-    if 'Movilizacion' not in st.session_state.nomina.columns: st.session_state.nomina['Movilizacion'] = 0
-    if 'Gratificacion' not in st.session_state.nomina.columns: st.session_state.nomina['Gratificacion'] = "Tope Legal Mensual"
-    if 'Bonos_No_Imponibles' in st.session_state.nomina.columns: st.session_state.nomina.drop(columns=['Bonos_No_Imponibles'], inplace=True)
+    # FORZADOR DE ACTUALIZACIÓN DE COLUMNAS PARA GOOGLE SHEETS
+    cambio_necesario = False
+    if 'Bonos_No_Imponibles' in st.session_state.nomina.columns:
+        st.session_state.nomina = st.session_state.nomina.drop(columns=['Bonos_No_Imponibles'])
+        cambio_necesario = True
+    for col in df_nomina_base.columns:
+        if col not in st.session_state.nomina.columns:
+            st.session_state.nomina[col] = df_nomina_base[col][0]
+            cambio_necesario = True
+    if cambio_necesario:
+        guardar_datos("Nomina_Personal", st.session_state.nomina) # Obliga a Google a aceptar el nuevo formato
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "Prioridad emergencias", "Monto (CLP)": 50000}])
@@ -146,25 +151,26 @@ def calcular_liquidaciones(df):
     resultados = []
     costo_empresa_total = 0
     for index, row in df.iterrows():
-        sueldo_base = float(row['Sueldo_Base'])
-        jornada = float(row['Jornada_Hrs'])
+        try:
+            sueldo_base = float(row['Sueldo_Base'])
+            jornada = float(row['Jornada_Hrs'])
+        except:
+            sueldo_base = 0.0
+            jornada = 44.0
         
-        # Matemáticas base para descuentos
-        valor_dia = sueldo_base / 30
+        valor_dia = sueldo_base / 30 if sueldo_base > 0 else 0
         valor_hora_normal = (sueldo_base / 30) * 28 / jornada if jornada > 0 else 0
         valor_hora_extra = valor_hora_normal * 1.5
         
-        # Calcular Gratificación
+        # Gratificación
         tipo_grati = str(row.get('Gratificacion', 'Sin Gratificación'))
         if tipo_grati == "Tope Legal Mensual":
-            # Tope legal en Chile aprox (4.75 ingresos minimos / 12)
             grati_monto = min(sueldo_base * 0.25, 197917)
         elif tipo_grati == "25% del Sueldo (Sin Tope)":
             grati_monto = sueldo_base * 0.25
         else:
             grati_monto = 0
             
-        # Calcular Imponible
         pago_extras = float(row.get('Horas_Extras', 0)) * valor_hora_extra
         dcto_faltas = float(row.get('Dias_Falta', 0)) * valor_dia
         dcto_atrasos = float(row.get('Horas_Atraso', 0)) * valor_hora_normal
@@ -172,17 +178,14 @@ def calcular_liquidaciones(df):
         sueldo_imponible = sueldo_base + grati_monto + pago_extras - dcto_faltas - dcto_atrasos
         if sueldo_imponible < 0: sueldo_imponible = 0
         
-        # Descuentos Legales
-        dcto_afp = sueldo_imponible * TASAS_AFP.get(row['AFP'], 0.1144)
+        dcto_afp = sueldo_imponible * TASAS_AFP.get(row.get('AFP', 'Habitat (11.27%)'), 0.1144)
         dcto_fonasa = sueldo_imponible * 0.07
         dcto_cesantia = sueldo_imponible * 0.006 
         
-        # Haberes No Imponibles
         colacion = float(row.get('Colacion', 0))
         movilizacion = float(row.get('Movilizacion', 0))
         no_imponibles = colacion + movilizacion
         
-        # Liquido Final
         sueldo_liquido = sueldo_imponible - dcto_afp - dcto_fonasa - dcto_cesantia + no_imponibles
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
@@ -303,7 +306,7 @@ if menu == "Finanzas y Nómina":
             else:
                 df_nomina_view = st.session_state.nomina.copy()
                 for col in ["Sueldo_Base", "Colacion", "Movilizacion"]:
-                    df_nomina_view[col] = pd.to_numeric(df_nomina_view[col], errors='coerce').apply(formato_clp)
+                    df_nomina_view[col] = pd.to_numeric(df_nomina_view.get(col, 0), errors='coerce').apply(formato_clp)
                 st.dataframe(df_nomina_view, use_container_width=True)
 
             st.write("---")
