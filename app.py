@@ -9,10 +9,26 @@ import json
 # ==========================================
 st.set_page_config(page_title="Panel Financiero Voltify", page_icon="logo.png", layout="wide")
 
+# ESCUDO VISUAL REFORZADO PARA OCULTAR INTERFAZ DE STREAMLIT Y GITHUB
 ocultar_menu_estilo = """
             <style>
-            [data-testid="stHeaderActionElements"] {visibility: hidden;}
-            footer {visibility: hidden;}
+            /* 1. Ocultar bloque superior derecho completo (Toolbar, Fork, GitHub, 3 puntos) */
+            [data-testid="stHeaderActionElements"] {display: none !important;}
+            [data-testid="stToolbar"] {display: none !important;}
+            
+            /* 2. Ocultar badges específicos de Streamlit Community Cloud */
+            .viewerBadge_container {display: none !important;}
+            #viewerBadge {display: none !important;}
+            iframe[src*="badge"] {display: none !important;}
+            
+            /* 3. Ocultar botón de Deploy explícito */
+            .stDeployButton {display: none !important;}
+            
+            /* 4. Ocultar marca de agua inferior (Made with Streamlit) */
+            footer {display: none !important;}
+            
+            /* 5. Ocultar la línea de colores de decoración en el borde superior */
+            [data-testid="stDecoration"] {display: none !important;}
             </style>
             """
 st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
