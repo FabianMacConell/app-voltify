@@ -20,6 +20,7 @@ ocultar_menu_estilo = """
             </style>
             """
 st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
+
 LOGO_URL = "logo.png"
 
 # ==========================================
@@ -56,6 +57,9 @@ def guardar_datos(nombre_hoja, df):
         df_clean = df.fillna(0)
         if 'Gratificacion' in df_clean.columns:
             df_clean['Gratificacion'] = df_clean['Gratificacion'].astype(str)
+        if 'Tipo_Contrato' in df_clean.columns:
+            df_clean['Tipo_Contrato'] = df_clean['Tipo_Contrato'].astype(str)
+            
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
         hoja.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
@@ -110,14 +114,17 @@ TASAS_AFP = {
 if 'nomina' not in st.session_state:
     df_nomina_base = pd.DataFrame([{
         "Trabajador": "Begoñia Mac-Conell Bacho", "Cargo": "Jefa de administracion y finanzas",
-        "Sueldo_Base": 850000, "Jornada_Hrs": 44, "Gratificacion": "Tope Legal Mensual", "AFP": "Habitat (11.27%)",
+        "Sueldo_Base": 850000, "Jornada_Hrs": 44, "Tipo_Contrato": "Indefinido", "Gratificacion": "Tope Legal Mensual", "AFP": "Habitat (11.27%)",
         "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Colacion": 0, "Movilizacion": 0
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
 
-# Forzador agresivo de actualización de columnas
+# Forzador agresivo de actualización de columnas (Añade Tipo_Contrato si no existe)
 cambio_necesario = False
 if 'nomina' in st.session_state:
+    if 'Tipo_Contrato' not in st.session_state.nomina.columns:
+        st.session_state.nomina['Tipo_Contrato'] = "Indefinido"
+        cambio_necesario = True
     if 'Colacion' not in st.session_state.nomina.columns:
         st.session_state.nomina['Colacion'] = 0
         cambio_necesario = True
@@ -190,9 +197,16 @@ def calcular_liquidaciones(df):
         sueldo_imponible = sueldo_base + grati_monto + pago_extras - dcto_faltas - dcto_atrasos
         if sueldo_imponible < 0: sueldo_imponible = 0
         
+        # Descuentos
         dcto_afp = sueldo_imponible * TASAS_AFP.get(row.get('AFP', 'Habitat (11.27%)'), 0.1144)
         dcto_fonasa = sueldo_imponible * 0.07
-        dcto_cesantia = sueldo_imponible * 0.006 
+        
+        # LOGICA SEGURO DE CESANTÍA: Indefinido (0.6%) vs Plazo Fijo (0%)
+        tipo_contrato = str(row.get('Tipo_Contrato', 'Indefinido'))
+        if tipo_contrato == "Indefinido":
+            dcto_cesantia = sueldo_imponible * 0.006 
+        else:
+            dcto_cesantia = 0.0
         
         colacion = float(row.get('Colacion', 0))
         movilizacion = float(row.get('Movilizacion', 0))
@@ -203,7 +217,7 @@ def calcular_liquidaciones(df):
         costo_empresa_total += costo_real_empresa
         
         resultados.append({
-            "Trabajador": row['Trabajador'], "Cargo": row['Cargo'],
+            "Trabajador": row['Trabajador'], "Cargo": row['Cargo'], "Contrato": tipo_contrato,
             "Imponible Calculado": sueldo_imponible, "Haberes No Imponibles": no_imponibles, 
             "Descuentos Ley": dcto_afp + dcto_fonasa + dcto_cesantia,
             "Líquido a Pagar": sueldo_liquido, "Costo Empresa": costo_real_empresa
@@ -276,27 +290,30 @@ if menu == "Finanzas y Nómina":
                     colC.text_input("Sueldo Base Mensual", key="input_sueldo_base", on_change=formatear_input, kwargs={'llave': 'input_sueldo_base'}, help="Escribe de corrido y presiona Enter")
                     n_sueldo = float(st.session_state['input_sueldo_base'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                     
-                    colD, colE, colF = st.columns(3)
+                    colD, colE = st.columns(2)
                     n_jornada = colD.number_input("Horas Semanales (Jornada)", value=44, max_value=45)
                     n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"])
-                    n_afp = colF.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
                     
-                    colG, colH = st.columns(2)
+                    colF, colG = st.columns(2)
+                    n_contrato = colF.selectbox("Tipo de Contrato", ["Indefinido", "Plazo Fijo"])
+                    n_afp = colG.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
+                    
+                    colH, colI = st.columns(2)
                     if 'input_colacion' not in st.session_state: st.session_state['input_colacion'] = "0"
                     if 'input_movilizacion' not in st.session_state: st.session_state['input_movilizacion'] = "0"
                     
-                    colG.text_input("Bono Colación (Opcional)", key="input_colacion", on_change=formatear_input, kwargs={'llave': 'input_colacion'})
+                    colH.text_input("Bono Colación (Opcional)", key="input_colacion", on_change=formatear_input, kwargs={'llave': 'input_colacion'})
                     n_cola = float(st.session_state['input_colacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                     
-                    colH.text_input("Bono Movilización (Opcional)", key="input_movilizacion", on_change=formatear_input, kwargs={'llave': 'input_movilizacion'})
+                    colI.text_input("Bono Movilización (Opcional)", key="input_movilizacion", on_change=formatear_input, kwargs={'llave': 'input_movilizacion'})
                     n_movi = float(st.session_state['input_movilizacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                     
                     if st.button("Guardar Perfil"):
                         if n_trabajador:
                             nuevo_perfil = pd.DataFrame([{
                                 "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
-                                "Jornada_Hrs": n_jornada, "Gratificacion": n_grati, "AFP": n_afp, 
-                                "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
+                                "Jornada_Hrs": n_jornada, "Tipo_Contrato": n_contrato, "Gratificacion": n_grati, 
+                                "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
                                 "Colacion": n_cola, "Movilizacion": n_movi
                             }])
                             st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
@@ -314,6 +331,7 @@ if menu == "Finanzas y Nómina":
                         "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, step=10000, format="%,d"),
                         "Colacion": st.column_config.NumberColumn("Colación", min_value=0, step=5000, format="%,d"),
                         "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, step=5000, format="%,d"),
+                        "Tipo_Contrato": st.column_config.SelectboxColumn("Contrato", options=["Indefinido", "Plazo Fijo"]),
                         "Gratificacion": st.column_config.SelectboxColumn("Gratificación", options=["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"]),
                         "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
                     },
