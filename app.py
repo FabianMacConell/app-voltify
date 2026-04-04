@@ -11,18 +11,15 @@ st.set_page_config(page_title="Panel Financiero Voltify", page_icon="logo.png", 
 
 ocultar_menu_estilo = """
             <style>
+            /* Ocultar solo el menú derecho de desarrollador */
             [data-testid="stHeaderActionElements"] {display: none !important;}
-            [data-testid="stToolbar"] {display: none !important;}
-            .viewerBadge_container {display: none !important;}
-            #viewerBadge {display: none !important;}
-            iframe[src*="badge"] {display: none !important;}
-            .stDeployButton {display: none !important;}
+            /* Ocultar marca de agua inferior */
             footer {display: none !important;}
-            [data-testid="stDecoration"] {display: none !important;}
+            /* FORZAR que el botón del menú lateral en celulares SIEMPRE se vea */
+            [data-testid="collapsedControl"] {display: flex !important; visibility: visible !important;}
             </style>
             """
 st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
-
 LOGO_URL = "logo.png"
 
 # ==========================================
