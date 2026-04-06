@@ -60,6 +60,7 @@ def guardar_datos(nombre_hoja, df):
         if 'Fecha_Inicio' in df_clean.columns: df_clean['Fecha_Inicio'] = df_clean['Fecha_Inicio'].astype(str)
         if 'Fecha_Termino' in df_clean.columns: df_clean['Fecha_Termino'] = df_clean['Fecha_Termino'].astype(str)
         if 'Fecha_Emision' in df_clean.columns: df_clean['Fecha_Emision'] = df_clean['Fecha_Emision'].astype(str)
+        if 'Num_OC' in df_clean.columns: df_clean['Num_OC'] = df_clean['Num_OC'].astype(str)
             
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
@@ -134,10 +135,9 @@ if 'nomina' in st.session_state:
 
 # --- PRESUPUESTOS ---
 if 'presupuestos' not in st.session_state:
-    df_presupuestos_base = pd.DataFrame(columns=["Tipo", "Referencia", "Cliente", "Monto", "Aprobacion", "Orden_Compra", "Estado_Comercial", "Fecha_Emision"])
+    df_presupuestos_base = pd.DataFrame(columns=["Tipo", "Referencia", "Cliente", "Monto", "Aprobacion", "Orden_Compra", "Num_OC", "Estado_Comercial", "Fecha_Emision"])
     st.session_state.presupuestos = cargar_datos("Presupuestos", df_presupuestos_base)
 
-# Forzador para actualizar la tabla de presupuestos con las nuevas columnas
 cambio_pres = False
 if 'presupuestos' in st.session_state:
     if 'Aprobacion' not in st.session_state.presupuestos.columns:
@@ -146,17 +146,26 @@ if 'presupuestos' in st.session_state:
     if 'Orden_Compra' not in st.session_state.presupuestos.columns:
         st.session_state.presupuestos['Orden_Compra'] = "Sin Orden"
         cambio_pres = True
+    if 'Num_OC' not in st.session_state.presupuestos.columns:
+        st.session_state.presupuestos['Num_OC'] = "N/A"
+        cambio_pres = True
     if cambio_pres:
         guardar_datos("Presupuestos", st.session_state.presupuestos)
 
 # --- PROYECTOS ---
 if 'proyectos_resumen' not in st.session_state:
-    df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Ciudad", "Cobro"])
+    df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Ciudad", "Num_OC", "Cobro"])
     st.session_state.proyectos_resumen = cargar_datos("Proyectos_Resumen", df_resumen_base)
 
+cambio_proy = False
 if 'proyectos_resumen' in st.session_state:
     if 'Ciudad' not in st.session_state.proyectos_resumen.columns:
         st.session_state.proyectos_resumen['Ciudad'] = "No especificada"
+        cambio_proy = True
+    if 'Num_OC' not in st.session_state.proyectos_resumen.columns:
+        st.session_state.proyectos_resumen['Num_OC'] = "Pendiente"
+        cambio_proy = True
+    if cambio_proy:
         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
 
 if 'proyectos_gastos' not in st.session_state:
@@ -375,8 +384,10 @@ if menu == "Finanzas y Nómina":
                     proyecto_fact = st.selectbox("Selecciona un proyecto a facturar:", proyectos_lista_fact)
                     idx_fact = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_fact].index[0]
                     cobro_fact = pd.to_numeric(st.session_state.proyectos_resumen.at[idx_fact, "Cobro"], errors='coerce')
+                    oc_fact = st.session_state.proyectos_resumen.at[idx_fact, "Num_OC"]
                     
                     st.markdown("#### Borrador Contable Automático")
+                    st.caption(f"Referencia OC: {oc_fact}")
                     neto_calc = int(cobro_fact / 1.19) if cobro_fact > 0 else 0
                     iva_calc = int(cobro_fact - neto_calc)
                     cn, ci, ct = st.columns(3)
@@ -417,9 +428,11 @@ elif menu == "Presupuestos":
         monto_pres = float(st.session_state['input_monto_presupuesto'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
         fecha_pres = colP4.date_input("Fecha de Emisión:")
         
-        colP5, colP6 = st.columns(2)
+        colP5, colP6, colP7 = st.columns(3)
         aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["Pendiente", "Aprobada", "No Aprobada"])
-        orden_pres = colP6.selectbox("Respaldo de Orden de Compra:", ["Sin Orden", "Con Orden"])
+        orden_pres = colP6.selectbox("Respaldo de Orden:", ["Sin Orden", "Con Orden"])
+        num_oc_pres = colP7.text_input("N° OC (Si aplica):", placeholder="Ej: OC-1234")
+        if not num_oc_pres: num_oc_pres = "N/A"
         
         if st.button("Guardar Presupuesto", type="primary"):
             if ref_pres and cliente_pres and monto_pres > 0:
@@ -430,6 +443,7 @@ elif menu == "Presupuestos":
                     "Monto": monto_pres,
                     "Aprobacion": aprobacion_pres,
                     "Orden_Compra": orden_pres,
+                    "Num_OC": num_oc_pres,
                     "Estado_Comercial": "Presupuestada",
                     "Fecha_Emision": str(fecha_pres)
                 }])
@@ -447,7 +461,7 @@ elif menu == "Presupuestos":
     if st.session_state.presupuestos.empty:
         st.info("Aún no hay cotizaciones emitidas en el sistema.")
     else:
-        st.write("Actualiza el estado de tus negociaciones haciendo clic en las celdas directamente:")
+        st.write("Actualiza el estado, la aprobación o el número de OC de tus negociaciones haciendo clic en las celdas:")
         opciones_estado = ["Presupuestada", "Adjudicada", "En progreso", "Entregada", "Pagada"]
         opciones_aprobacion = ["Pendiente", "Aprobada", "No Aprobada"]
         opciones_orden = ["Sin Orden", "Con Orden"]
@@ -455,9 +469,10 @@ elif menu == "Presupuestos":
         df_pres_edit = st.data_editor(
             st.session_state.presupuestos,
             column_config={
-                "Monto": st.column_config.NumberColumn("Monto Total (CLP)", format="%,d"),
+                "Monto": st.column_config.NumberColumn("Monto Total", format="%,d"),
                 "Aprobacion": st.column_config.SelectboxColumn("Aprobación", options=opciones_aprobacion),
-                "Orden_Compra": st.column_config.SelectboxColumn("Orden Compra", options=opciones_orden),
+                "Orden_Compra": st.column_config.SelectboxColumn("Orden", options=opciones_orden),
+                "Num_OC": st.column_config.TextColumn("N° O.C."),
                 "Estado_Comercial": st.column_config.SelectboxColumn("Estado Comercial", options=opciones_estado),
                 "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión")
             },
@@ -508,15 +523,19 @@ elif menu == "Proyectos":
     else:
         if st.session_state.acceso_proyectos == "admin":
             with st.expander("Crear Nueva Carpeta de Proyecto", expanded=False):
-                colA, colB, colC = st.columns(3)
+                colA, colB = st.columns(2)
                 nombre_p = colA.text_input("Nombre de la Obra o Proyecto")
                 empresa_p = colB.text_input("Nombre de la Empresa / Cliente")
+                
+                colC, colD = st.columns(2)
                 ciudad_p = colC.text_input("Ciudad de ejecución")
+                oc_p = colD.text_input("N° Orden de Compra (Si la tienes)", placeholder="Ej: OC-4567")
                 
                 if st.button("Crear Proyecto", type="primary"):
                     if nombre_p and nombre_p not in st.session_state.proyectos_resumen["Proyecto"].values:
                         ciudad_final = ciudad_p if ciudad_p else "No especificada"
-                        nuevo_resumen = pd.DataFrame([{"Proyecto": nombre_p, "Empresa": empresa_p, "Ciudad": ciudad_final, "Cobro": 0}])
+                        oc_final = oc_p if oc_p else "Pendiente"
+                        nuevo_resumen = pd.DataFrame([{"Proyecto": nombre_p, "Empresa": empresa_p, "Ciudad": ciudad_final, "Num_OC": oc_final, "Cobro": 0}])
                         nuevo_gasto = pd.DataFrame([{"Proyecto": nombre_p, "Detalle_Gasto": "Materiales iniciales", "Monto": 0}])
                         st.session_state.proyectos_resumen = pd.concat([st.session_state.proyectos_resumen, nuevo_resumen], ignore_index=True)
                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto], ignore_index=True)
@@ -532,17 +551,27 @@ elif menu == "Proyectos":
             proyecto_seleccionado = st.selectbox("Selecciona un proyecto:", proyectos_lista)
             idx_proy = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seleccionado].index[0]
             cobro_actual = st.session_state.proyectos_resumen.at[idx_proy, "Cobro"]
+            oc_actual = st.session_state.proyectos_resumen.at[idx_proy, "Num_OC"]
             df_gastos_proy = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == proyecto_seleccionado].copy()
 
             col1, col2 = st.columns([1, 2])
             with col1:
-                st.write("### Ingreso (Cobro)")
+                st.write("### Datos de Ingreso")
                 if st.session_state.acceso_proyectos == "admin":
+                    # Editar OC
+                    llave_oc = f"oc_{proyecto_seleccionado}"
+                    if llave_oc not in st.session_state: st.session_state[llave_oc] = str(oc_actual)
+                    nueva_oc = st.text_input("N° Orden de Compra Asociada:", key=llave_oc)
+                    
+                    # Editar Cobro
                     llave_cobro = f"cobro_{proyecto_seleccionado}"
                     if llave_cobro not in st.session_state: st.session_state[llave_cobro] = f"{int(cobro_actual):,}".replace(",", ".")
                     st.text_input("Valor total cobrado (CLP):", key=llave_cobro, on_change=formatear_input, kwargs={'llave': llave_cobro})
                     nuevo_cobro = float(st.session_state[llave_cobro].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                 else:
+                    st.info(f"N° OC: {oc_actual}")
+                    st.info(f"Cobro Total: {formato_clp(cobro_actual)}")
+                    nueva_oc = oc_actual
                     nuevo_cobro = cobro_actual
 
             with col2:
@@ -588,6 +617,7 @@ elif menu == "Proyectos":
                 with col_save:
                     if st.button("Guardar Cambios de Proyecto", type="primary", use_container_width=True):
                         st.session_state.proyectos_resumen.at[idx_proy, "Cobro"] = nuevo_cobro
+                        st.session_state.proyectos_resumen.at[idx_proy, "Num_OC"] = nueva_oc  # Guardar la nueva OC
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         df_gastos_editados["Proyecto"] = proyecto_seleccionado
                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_gastos_editados], ignore_index=True)
