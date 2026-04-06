@@ -145,7 +145,7 @@ if 'proyectos_gastos' not in st.session_state:
     df_gastos_base = pd.DataFrame(columns=["Proyecto", "Detalle_Gasto", "Monto"])
     st.session_state.proyectos_gastos = cargar_datos("Proyectos_Gastos", df_gastos_base)
 
-# --- NUEVO: TAREAS Y SEGUIMIENTO ---
+# --- TAREAS Y SEGUIMIENTO ---
 if 'proyectos_tareas' not in st.session_state:
     df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Horas_Estimadas", "Fecha_Inicio", "Fecha_Termino", "Estado"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
@@ -480,14 +480,21 @@ elif menu == "Proyectos":
                         st.success("Guardado correctamente.")
                 with col_del:
                     if st.button("Eliminar Proyecto", use_container_width=True):
+                        # Se destruye el proyecto en el resumen y los gastos
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado]
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
+                        
+                        # NUEVO: Se destruyen también las tareas de seguimiento para no dejar basura
+                        if 'proyectos_tareas' in st.session_state:
+                            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] != proyecto_seleccionado]
+                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                            
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                         st.rerun()
 
 # ==========================================
-# PANTALLA 3: SEGUIMIENTO OPERATIVO (NUEVA)
+# PANTALLA 3: SEGUIMIENTO OPERATIVO
 # ==========================================
 elif menu == "Seguimiento Operativo":
     st.title("Control y Seguimiento de Tareas")
@@ -551,7 +558,7 @@ elif menu == "Seguimiento Operativo":
                     "Fecha_Inicio": st.column_config.TextColumn("F. Inicio"),
                     "Fecha_Termino": st.column_config.TextColumn("F. Término"),
                 },
-                disabled=["Proyecto", "Trabajador", "Tarea"], # Proteger info clave para que no se borre
+                disabled=["Proyecto", "Trabajador", "Tarea"],
                 hide_index=True,
                 use_container_width=True,
                 key=f"ed_tar_{proyecto_seg}"
@@ -562,6 +569,21 @@ elif menu == "Seguimiento Operativo":
                 st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
                 guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
                 st.success("Progreso y estados actualizados en la base de datos.")
+                
+            st.write("---")
+            # --- NUEVO: Eliminación de Tareas Específicas ---
+            with st.expander("🗑️ Eliminar una Tarea Específica", expanded=False):
+                st.warning("Atención: Esta acción eliminará la tarea seleccionada permanentemente.")
+                lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
+                tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
+                
+                if st.button("Eliminar Tarea Seleccionada"):
+                    # Filtramos todo lo que NO sea esta tarea en este proyecto exacto
+                    mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
+                    st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
+                    guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                    st.success("Tarea eliminada correctamente.")
+                    st.rerun()
 
 # ==========================================
 # PANTALLA 4: BALANCE TOTAL
