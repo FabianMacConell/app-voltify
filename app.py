@@ -59,6 +59,7 @@ def guardar_datos(nombre_hoja, df):
         if 'Tipo_Contrato' in df_clean.columns: df_clean['Tipo_Contrato'] = df_clean['Tipo_Contrato'].astype(str)
         if 'Fecha_Inicio' in df_clean.columns: df_clean['Fecha_Inicio'] = df_clean['Fecha_Inicio'].astype(str)
         if 'Fecha_Termino' in df_clean.columns: df_clean['Fecha_Termino'] = df_clean['Fecha_Termino'].astype(str)
+        if 'Fecha_Emision' in df_clean.columns: df_clean['Fecha_Emision'] = df_clean['Fecha_Emision'].astype(str)
             
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
@@ -131,6 +132,23 @@ if 'nomina' in st.session_state:
         cambio_nomina = True
     if cambio_nomina: guardar_datos("Nomina_Personal", st.session_state.nomina)
 
+# --- PRESUPUESTOS ---
+if 'presupuestos' not in st.session_state:
+    df_presupuestos_base = pd.DataFrame(columns=["Tipo", "Referencia", "Cliente", "Monto", "Aprobacion", "Orden_Compra", "Estado_Comercial", "Fecha_Emision"])
+    st.session_state.presupuestos = cargar_datos("Presupuestos", df_presupuestos_base)
+
+# Forzador para actualizar la tabla de presupuestos con las nuevas columnas
+cambio_pres = False
+if 'presupuestos' in st.session_state:
+    if 'Aprobacion' not in st.session_state.presupuestos.columns:
+        st.session_state.presupuestos['Aprobacion'] = "Pendiente"
+        cambio_pres = True
+    if 'Orden_Compra' not in st.session_state.presupuestos.columns:
+        st.session_state.presupuestos['Orden_Compra'] = "Sin Orden"
+        cambio_pres = True
+    if cambio_pres:
+        guardar_datos("Presupuestos", st.session_state.presupuestos)
+
 # --- PROYECTOS ---
 if 'proyectos_resumen' not in st.session_state:
     df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Ciudad", "Cobro"])
@@ -152,7 +170,7 @@ if 'proyectos_tareas' not in st.session_state:
 
 # --- GASTOS FIJOS ---
 if 'gastos_fijos' not in st.session_state:
-    df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "Prioridad emergencias", "Monto (CLP)": 50000}])
+    df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
     st.session_state.gastos_fijos = cargar_datos("Gastos_Fijos", df_fijos_base)
 
 # --- FUNCIONES MATEMÁTICAS ---
@@ -240,7 +258,7 @@ if st.sidebar.button("Bloquear Secciones"):
     st.rerun()
 
 st.sidebar.divider()
-menu = st.sidebar.radio("Navegación:", ["Finanzas y Nómina", "Proyectos", "Seguimiento Operativo", "Balance Total"])
+menu = st.sidebar.radio("Navegación:", ["Finanzas y Nómina", "Presupuestos", "Proyectos", "Seguimiento Operativo", "Balance Total"])
 
 # ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
@@ -369,7 +387,105 @@ if menu == "Finanzas y Nómina":
                     st.info("Aún no tienes proyectos creados.")
 
 # ==========================================
-# PANTALLA 2: PROYECTOS
+# PANTALLA 2: PRESUPUESTOS Y COTIZACIONES
+# ==========================================
+elif menu == "Presupuestos":
+    st.title("Gestión de Presupuestos y Cotizaciones")
+    st.info("🔓 Módulo comercial sin clave para configuración inicial.")
+    
+    with st.expander("📝 Crear Nueva Cotización / Presupuesto", expanded=False):
+        tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True)
+        
+        colP1, colP2 = st.columns(2)
+        if tipo_pres == "Asociada a un Proyecto":
+            proyectos_existentes = st.session_state.proyectos_resumen["Proyecto"].tolist()
+            if proyectos_existentes:
+                ref_pres = colP1.selectbox("Seleccionar Proyecto:", proyectos_existentes)
+                idx_pres = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == ref_pres].index[0]
+                cliente_pres = st.session_state.proyectos_resumen.at[idx_pres, "Empresa"]
+                colP2.info(f"Cliente vinculado: **{cliente_pres}**")
+            else:
+                st.warning("Aún no tienes proyectos. Ve a la pestaña 'Proyectos' para crear uno primero.")
+                ref_pres, cliente_pres = None, None
+        else:
+            ref_pres = colP1.text_input("Nombre del Producto o Servicio:", placeholder="Ej: Venta de 50m cable eléctrico")
+            cliente_pres = colP2.text_input("Nombre del Cliente:")
+            
+        colP3, colP4 = st.columns(2)
+        if 'input_monto_presupuesto' not in st.session_state: st.session_state['input_monto_presupuesto'] = "0"
+        colP3.text_input("Monto Total Cotizado (CLP):", key="input_monto_presupuesto", on_change=formatear_input, kwargs={'llave': 'input_monto_presupuesto'})
+        monto_pres = float(st.session_state['input_monto_presupuesto'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+        fecha_pres = colP4.date_input("Fecha de Emisión:")
+        
+        colP5, colP6 = st.columns(2)
+        aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["Pendiente", "Aprobada", "No Aprobada"])
+        orden_pres = colP6.selectbox("Respaldo de Orden de Compra:", ["Sin Orden", "Con Orden"])
+        
+        if st.button("Guardar Presupuesto", type="primary"):
+            if ref_pres and cliente_pres and monto_pres > 0:
+                nuevo_presupuesto = pd.DataFrame([{
+                    "Tipo": tipo_pres,
+                    "Referencia": ref_pres,
+                    "Cliente": cliente_pres,
+                    "Monto": monto_pres,
+                    "Aprobacion": aprobacion_pres,
+                    "Orden_Compra": orden_pres,
+                    "Estado_Comercial": "Presupuestada",
+                    "Fecha_Emision": str(fecha_pres)
+                }])
+                st.session_state.presupuestos = pd.concat([st.session_state.presupuestos, nuevo_presupuesto], ignore_index=True)
+                guardar_datos("Presupuestos", st.session_state.presupuestos)
+                st.session_state['input_monto_presupuesto'] = "0"
+                st.success("Presupuesto ingresado exitosamente.")
+                st.rerun()
+            else:
+                st.error("Por favor, completa la referencia, el cliente y asegúrate de que el monto sea mayor a 0.")
+
+    st.divider()
+    st.subheader("Panel de Seguimiento Comercial")
+    
+    if st.session_state.presupuestos.empty:
+        st.info("Aún no hay cotizaciones emitidas en el sistema.")
+    else:
+        st.write("Actualiza el estado de tus negociaciones haciendo clic en las celdas directamente:")
+        opciones_estado = ["Presupuestada", "Adjudicada", "En progreso", "Entregada", "Pagada"]
+        opciones_aprobacion = ["Pendiente", "Aprobada", "No Aprobada"]
+        opciones_orden = ["Sin Orden", "Con Orden"]
+        
+        df_pres_edit = st.data_editor(
+            st.session_state.presupuestos,
+            column_config={
+                "Monto": st.column_config.NumberColumn("Monto Total (CLP)", format="%,d"),
+                "Aprobacion": st.column_config.SelectboxColumn("Aprobación", options=opciones_aprobacion),
+                "Orden_Compra": st.column_config.SelectboxColumn("Orden Compra", options=opciones_orden),
+                "Estado_Comercial": st.column_config.SelectboxColumn("Estado Comercial", options=opciones_estado),
+                "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión")
+            },
+            disabled=["Tipo", "Referencia", "Cliente"],
+            hide_index=True,
+            use_container_width=True,
+            key="ed_pres"
+        )
+        
+        if st.button("💾 Guardar Estados Comerciales", type="primary"):
+            st.session_state.presupuestos = df_pres_edit
+            guardar_datos("Presupuestos", st.session_state.presupuestos)
+            st.success("Estados de presupuesto actualizados en la base de datos.")
+            
+        st.write("---")
+        with st.expander("🗑️ Eliminar un Presupuesto"):
+            lista_borrar_pres = [f"[{row['Estado_Comercial']}] {row['Referencia']} - {row['Cliente']} ({formato_clp(row['Monto'])})" for i, row in st.session_state.presupuestos.iterrows()]
+            pres_a_borrar = st.selectbox("Selecciona la cotización a eliminar:", lista_borrar_pres)
+            
+            if st.button("Eliminar Presupuesto Definitivamente"):
+                idx_borrar = lista_borrar_pres.index(pres_a_borrar)
+                st.session_state.presupuestos = st.session_state.presupuestos.drop(st.session_state.presupuestos.index[idx_borrar]).reset_index(drop=True)
+                guardar_datos("Presupuestos", st.session_state.presupuestos)
+                st.success("Cotización eliminada correctamente.")
+                st.rerun()
+
+# ==========================================
+# PANTALLA 3: PROYECTOS
 # ==========================================
 elif menu == "Proyectos":
     st.title("Gestión de Proyectos")
@@ -480,11 +596,9 @@ elif menu == "Proyectos":
                         st.success("Guardado correctamente.")
                 with col_del:
                     if st.button("Eliminar Proyecto", use_container_width=True):
-                        # Se destruye el proyecto en el resumen y los gastos
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado]
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         
-                        # NUEVO: Se destruyen también las tareas de seguimiento para no dejar basura
                         if 'proyectos_tareas' in st.session_state:
                             st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] != proyecto_seleccionado]
                             guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
@@ -494,7 +608,7 @@ elif menu == "Proyectos":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 3: SEGUIMIENTO OPERATIVO
+# PANTALLA 4: SEGUIMIENTO OPERATIVO
 # ==========================================
 elif menu == "Seguimiento Operativo":
     st.title("Control y Seguimiento de Tareas")
@@ -508,7 +622,6 @@ elif menu == "Seguimiento Operativo":
         proyecto_seg = st.selectbox("Selecciona un Proyecto para hacer seguimiento:", proyectos_lista_seg)
         st.divider()
         
-        # --- Formulario de Asignación ---
         with st.expander("➕ Crear y Asignar Tarea", expanded=False):
             df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
             trabajadores_seg = ["Seleccione..."] + df_liq["Trabajador"].tolist()
@@ -540,7 +653,6 @@ elif menu == "Seguimiento Operativo":
                 else:
                     st.error("Debes seleccionar un trabajador y escribir una descripción.")
 
-        # --- Tabla de Control Interactiva ---
         st.subheader(f"Panel de Progreso: {proyecto_seg}")
         
         mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
@@ -571,14 +683,12 @@ elif menu == "Seguimiento Operativo":
                 st.success("Progreso y estados actualizados en la base de datos.")
                 
             st.write("---")
-            # --- NUEVO: Eliminación de Tareas Específicas ---
             with st.expander("🗑️ Eliminar una Tarea Específica", expanded=False):
                 st.warning("Atención: Esta acción eliminará la tarea seleccionada permanentemente.")
                 lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
                 tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
                 
                 if st.button("Eliminar Tarea Seleccionada"):
-                    # Filtramos todo lo que NO sea esta tarea en este proyecto exacto
                     mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
                     st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
                     guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
@@ -586,7 +696,7 @@ elif menu == "Seguimiento Operativo":
                     st.rerun()
 
 # ==========================================
-# PANTALLA 4: BALANCE TOTAL
+# PANTALLA 5: BALANCE TOTAL
 # ==========================================
 elif menu == "Balance Total":
     st.title("Balance General de la Empresa")
