@@ -119,7 +119,6 @@ if 'nomina' not in st.session_state:
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
 
-# Forzador agresivo de actualización de columnas (Añade Tipo_Contrato si no existe)
 cambio_necesario = False
 if 'nomina' in st.session_state:
     if 'Tipo_Contrato' not in st.session_state.nomina.columns:
@@ -197,11 +196,9 @@ def calcular_liquidaciones(df):
         sueldo_imponible = sueldo_base + grati_monto + pago_extras - dcto_faltas - dcto_atrasos
         if sueldo_imponible < 0: sueldo_imponible = 0
         
-        # Descuentos
         dcto_afp = sueldo_imponible * TASAS_AFP.get(row.get('AFP', 'Habitat (11.27%)'), 0.1144)
         dcto_fonasa = sueldo_imponible * 0.07
         
-        # LOGICA SEGURO DE CESANTÍA: Indefinido (0.6%) vs Plazo Fijo (0%)
         tipo_contrato = str(row.get('Tipo_Contrato', 'Indefinido'))
         if tipo_contrato == "Indefinido":
             dcto_cesantia = sueldo_imponible * 0.006 
@@ -275,7 +272,8 @@ if menu == "Finanzas y Nómina":
     else:
         if st.session_state.acceso_finanzas == "observador": st.warning("MODO OBSERVADOR: Visualización en modo lectura.")
             
-        tab_nomina, tab_fijos = st.tabs(["Nómina y Liquidaciones", "Gastos Fijos Operativos"])
+        # --- AÑADIDA LA TERCERA PESTAÑA DE FACTURACIÓN ---
+        tab_nomina, tab_fijos, tab_facturas = st.tabs(["Nómina y Liquidaciones", "Gastos Fijos Operativos", "Emisión de Facturas"])
         
         with tab_nomina:
             st.subheader("Control de Asistencia y Nómina")
@@ -368,6 +366,48 @@ if menu == "Finanzas y Nómina":
                 df_fijos_view = st.session_state.gastos_fijos.copy()
                 df_fijos_view["Monto (CLP)"] = pd.to_numeric(df_fijos_view["Monto (CLP)"], errors='coerce').apply(formato_clp)
                 st.dataframe(df_fijos_view, use_container_width=True)
+
+        # --- CONTENIDO DE LA PESTAÑA DE FACTURACIÓN ---
+        with tab_facturas:
+            st.subheader("Módulo de Emisión de Facturas (Maqueta)")
+            st.write("Selecciona un proyecto terminado o en curso para generar su cobro oficial.")
+            
+            if st.session_state.acceso_finanzas == "admin":
+                proyectos_lista_fact = st.session_state.proyectos_resumen["Proyecto"].tolist()
+                
+                if proyectos_lista_fact:
+                    proyecto_fact = st.selectbox("Selecciona un proyecto a facturar:", proyectos_lista_fact, key="sel_fact_proy")
+                    
+                    idx_fact = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_fact].index[0]
+                    cobro_fact = pd.to_numeric(st.session_state.proyectos_resumen.at[idx_fact, "Cobro"], errors='coerce')
+                    empresa_fact = st.session_state.proyectos_resumen.at[idx_fact, "Empresa"]
+                    
+                    st.markdown(f"**Cliente / Empresa asociada:** {empresa_fact}")
+                    
+                    col_r, col_g = st.columns(2)
+                    rut_dummy = col_r.text_input("RUT Cliente", placeholder="Ej: 76.123.456-7")
+                    giro_dummy = col_g.text_input("Giro Comercial", placeholder="Ej: Construcción")
+                    
+                    st.write("---")
+                    st.markdown("#### Borrador Contable Automático")
+                    
+                    # Cálculo automático de Neto e IVA
+                    neto_calc = int(cobro_fact / 1.19) if cobro_fact > 0 else 0
+                    iva_calc = int(cobro_fact - neto_calc)
+                    
+                    cn, ci, ct = st.columns(3)
+                    cn.metric("Monto Neto", formato_clp(neto_calc))
+                    ci.metric("IVA (19%)", formato_clp(iva_calc))
+                    ct.metric("Total a Facturar", formato_clp(cobro_fact))
+                    
+                    st.write("")
+                    if st.button("Generar Factura Electrónica (SII)", type="primary", use_container_width=True, disabled=True):
+                        pass
+                    st.caption("🔒 Este botón se habilitará al conectar una API externa (ej. SimpleAPI).")
+                else:
+                    st.info("Aún no tienes proyectos creados. Ve a la sección 'Proyectos' en el menú lateral para iniciar uno.")
+            else:
+                st.warning("Solo los administradores pueden emitir facturas.")
 
 # ==========================================
 # PANTALLA 2: PROYECTOS
@@ -465,7 +505,7 @@ elif menu == "Proyectos":
                 st.write("---")
                 col_save, col_del = st.columns(2)
                 with col_save:
-                    if st.button("Guardar Cambios", type="primary", use_container_width=True):
+                    if st.button("Guardar Cambios de Proyecto", type="primary", use_container_width=True):
                         st.session_state.proyectos_resumen.at[idx_proy, "Cobro"] = nuevo_cobro
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         df_gastos_editados["Proyecto"] = proyecto_seleccionado
