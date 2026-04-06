@@ -119,34 +119,31 @@ if 'nomina' not in st.session_state:
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
 
-cambio_necesario = False
+# Forzador de Columnas Nómina
+cambio_nomina = False
 if 'nomina' in st.session_state:
-    if 'Tipo_Contrato' not in st.session_state.nomina.columns:
-        st.session_state.nomina['Tipo_Contrato'] = "Indefinido"
-        cambio_necesario = True
-    if 'Colacion' not in st.session_state.nomina.columns:
-        st.session_state.nomina['Colacion'] = 0
-        cambio_necesario = True
-    if 'Movilizacion' not in st.session_state.nomina.columns:
-        st.session_state.nomina['Movilizacion'] = 0
-        cambio_necesario = True
-    if 'Gratificacion' not in st.session_state.nomina.columns:
-        st.session_state.nomina['Gratificacion'] = "Tope Legal Mensual"
-        cambio_necesario = True
+    for col in ['Tipo_Contrato', 'Colacion', 'Movilizacion', 'Gratificacion']:
+        if col not in st.session_state.nomina.columns:
+            st.session_state.nomina[col] = "Indefinido" if col == 'Tipo_Contrato' else "Tope Legal Mensual" if col == 'Gratificacion' else 0
+            cambio_nomina = True
     if 'Bonos_No_Imponibles' in st.session_state.nomina.columns:
         st.session_state.nomina = st.session_state.nomina.drop(columns=['Bonos_No_Imponibles'])
-        cambio_necesario = True
-        
-    if cambio_necesario:
-        guardar_datos("Nomina_Personal", st.session_state.nomina)
+        cambio_nomina = True
+    if cambio_nomina: guardar_datos("Nomina_Personal", st.session_state.nomina)
+
+if 'proyectos_resumen' not in st.session_state:
+    df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Ciudad", "Cobro"])
+    st.session_state.proyectos_resumen = cargar_datos("Proyectos_Resumen", df_resumen_base)
+
+# Forzador de Columna Ciudad en Proyectos
+if 'proyectos_resumen' in st.session_state:
+    if 'Ciudad' not in st.session_state.proyectos_resumen.columns:
+        st.session_state.proyectos_resumen['Ciudad'] = "No especificada"
+        guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "Prioridad emergencias", "Monto (CLP)": 50000}])
     st.session_state.gastos_fijos = cargar_datos("Gastos_Fijos", df_fijos_base)
-
-if 'proyectos_resumen' not in st.session_state:
-    df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Cobro"])
-    st.session_state.proyectos_resumen = cargar_datos("Proyectos_Resumen", df_resumen_base)
 
 if 'proyectos_gastos' not in st.session_state:
     df_gastos_base = pd.DataFrame(columns=["Proyecto", "Detalle_Gasto", "Monto"])
@@ -182,12 +179,9 @@ def calcular_liquidaciones(df):
         valor_hora_extra = valor_hora_normal * 1.5
         
         tipo_grati = str(row.get('Gratificacion', 'Sin Gratificación'))
-        if tipo_grati == "Tope Legal Mensual":
-            grati_monto = min(sueldo_base * 0.25, 197917)
-        elif tipo_grati == "25% del Sueldo (Sin Tope)":
-            grati_monto = sueldo_base * 0.25
-        else:
-            grati_monto = 0
+        if tipo_grati == "Tope Legal Mensual": grati_monto = min(sueldo_base * 0.25, 197917)
+        elif tipo_grati == "25% del Sueldo (Sin Tope)": grati_monto = sueldo_base * 0.25
+        else: grati_monto = 0
             
         pago_extras = float(row.get('Horas_Extras', 0)) * valor_hora_extra
         dcto_faltas = float(row.get('Dias_Falta', 0)) * valor_dia
@@ -200,10 +194,7 @@ def calcular_liquidaciones(df):
         dcto_fonasa = sueldo_imponible * 0.07
         
         tipo_contrato = str(row.get('Tipo_Contrato', 'Indefinido'))
-        if tipo_contrato == "Indefinido":
-            dcto_cesantia = sueldo_imponible * 0.006 
-        else:
-            dcto_cesantia = 0.0
+        dcto_cesantia = sueldo_imponible * 0.006 if tipo_contrato == "Indefinido" else 0.0
         
         colacion = float(row.get('Colacion', 0))
         movilizacion = float(row.get('Movilizacion', 0))
@@ -272,7 +263,6 @@ if menu == "Finanzas y Nómina":
     else:
         if st.session_state.acceso_finanzas == "observador": st.warning("MODO OBSERVADOR: Visualización en modo lectura.")
             
-        # --- AÑADIDA LA TERCERA PESTAÑA DE FACTURACIÓN ---
         tab_nomina, tab_fijos, tab_facturas = st.tabs(["Nómina y Liquidaciones", "Gastos Fijos Operativos", "Emisión de Facturas"])
         
         with tab_nomina:
@@ -367,7 +357,6 @@ if menu == "Finanzas y Nómina":
                 df_fijos_view["Monto (CLP)"] = pd.to_numeric(df_fijos_view["Monto (CLP)"], errors='coerce').apply(formato_clp)
                 st.dataframe(df_fijos_view, use_container_width=True)
 
-        # --- CONTENIDO DE LA PESTAÑA DE FACTURACIÓN ---
         with tab_facturas:
             st.subheader("Módulo de Emisión de Facturas (Maqueta)")
             st.write("Selecciona un proyecto terminado o en curso para generar su cobro oficial.")
@@ -377,12 +366,12 @@ if menu == "Finanzas y Nómina":
                 
                 if proyectos_lista_fact:
                     proyecto_fact = st.selectbox("Selecciona un proyecto a facturar:", proyectos_lista_fact, key="sel_fact_proy")
-                    
                     idx_fact = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_fact].index[0]
                     cobro_fact = pd.to_numeric(st.session_state.proyectos_resumen.at[idx_fact, "Cobro"], errors='coerce')
                     empresa_fact = st.session_state.proyectos_resumen.at[idx_fact, "Empresa"]
+                    ciudad_fact = st.session_state.proyectos_resumen.at[idx_fact, "Ciudad"]
                     
-                    st.markdown(f"**Cliente / Empresa asociada:** {empresa_fact}")
+                    st.markdown(f"**Cliente:** {empresa_fact} | **Ciudad:** {ciudad_fact}")
                     
                     col_r, col_g = st.columns(2)
                     rut_dummy = col_r.text_input("RUT Cliente", placeholder="Ej: 76.123.456-7")
@@ -390,8 +379,6 @@ if menu == "Finanzas y Nómina":
                     
                     st.write("---")
                     st.markdown("#### Borrador Contable Automático")
-                    
-                    # Cálculo automático de Neto e IVA
                     neto_calc = int(cobro_fact / 1.19) if cobro_fact > 0 else 0
                     iva_calc = int(cobro_fact - neto_calc)
                     
@@ -435,19 +422,21 @@ elif menu == "Proyectos":
             
         if st.session_state.acceso_proyectos == "admin":
             with st.expander("Crear Nueva Carpeta de Proyecto", expanded=False):
-                colA, colB = st.columns(2)
+                colA, colB, colC = st.columns(3)
                 nombre_p = colA.text_input("Nombre de la Obra o Proyecto")
                 empresa_p = colB.text_input("Nombre de la Empresa / Cliente")
+                ciudad_p = colC.text_input("Ciudad de ejecución")
                 
                 if st.button("Crear Proyecto", type="primary"):
                     if nombre_p and nombre_p not in st.session_state.proyectos_resumen["Proyecto"].values:
-                        nuevo_resumen = pd.DataFrame([{"Proyecto": nombre_p, "Empresa": empresa_p, "Cobro": 0}])
+                        ciudad_final = ciudad_p if ciudad_p else "No especificada"
+                        nuevo_resumen = pd.DataFrame([{"Proyecto": nombre_p, "Empresa": empresa_p, "Ciudad": ciudad_final, "Cobro": 0}])
                         nuevo_gasto = pd.DataFrame([{"Proyecto": nombre_p, "Detalle_Gasto": "Materiales iniciales", "Monto": 0}])
                         st.session_state.proyectos_resumen = pd.concat([st.session_state.proyectos_resumen, nuevo_resumen], ignore_index=True)
                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto], ignore_index=True)
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                        st.success(f"Carpeta '{nombre_p}' creada.")
+                        st.success(f"Carpeta '{nombre_p}' creada en {ciudad_final}.")
                         st.rerun()
 
         st.divider()
@@ -459,10 +448,11 @@ elif menu == "Proyectos":
             
             idx_proy = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seleccionado].index[0]
             empresa_actual = st.session_state.proyectos_resumen.at[idx_proy, "Empresa"]
+            ciudad_actual = st.session_state.proyectos_resumen.at[idx_proy, "Ciudad"]
             cobro_actual = st.session_state.proyectos_resumen.at[idx_proy, "Cobro"]
             df_gastos_proy = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == proyecto_seleccionado].copy()
 
-            st.markdown(f"#### Empresa / Cliente: **{empresa_actual}**")
+            st.markdown(f"#### 🏢 Cliente: **{empresa_actual}** | 📍 Ciudad: **{ciudad_actual}**")
             col1, col2 = st.columns([1, 2])
             
             with col1:
@@ -492,6 +482,40 @@ elif menu == "Proyectos":
                     st.dataframe(df_gastos_view, use_container_width=True)
                     df_gastos_editados = df_gastos_proy[["Detalle_Gasto", "Monto"]]
 
+            # --- MÓDULO DE ASIGNACIÓN DE MANO DE OBRA ---
+            if st.session_state.acceso_proyectos == "admin":
+                with st.expander("👥 Asignar Equipo de Trabajo (Mano de Obra)", expanded=False):
+                    st.write("Selecciona trabajadores de tu nómina para cargar su costo a los gastos de este proyecto.")
+                    
+                    df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
+                    nombres_trabajadores = df_liq["Trabajador"].tolist()
+                    
+                    colT1, colT2, colT3 = st.columns([2, 1, 1])
+                    trabajador_sel = colT1.selectbox("Seleccionar Trabajador", ["Seleccione..."] + nombres_trabajadores)
+                    
+                    if trabajador_sel != "Seleccione...":
+                        costo_empresa_trab = df_liq[df_liq["Trabajador"] == trabajador_sel]["Costo Empresa"].values[0]
+                        colT2.info(f"Costo Empresa (Mensual): \n**{formato_clp(costo_empresa_trab)}**")
+                        
+                        llave_costo_trab = "costo_asignado_trab"
+                        if llave_costo_trab not in st.session_state: st.session_state[llave_costo_trab] = "0"
+                        colT3.text_input("Monto a imputar al proyecto:", key=llave_costo_trab, on_change=formatear_input, kwargs={'llave': llave_costo_trab})
+                        monto_asignado = float(st.session_state[llave_costo_trab].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        
+                        if st.button("Añadir al Gasto del Proyecto", type="secondary"):
+                            if monto_asignado > 0:
+                                nuevo_gasto_trab = pd.DataFrame([{
+                                    "Proyecto": proyecto_seleccionado, 
+                                    "Detalle_Gasto": f"Mano de obra: {trabajador_sel}", 
+                                    "Monto": monto_asignado
+                                }])
+                                st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
+                                guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                                st.session_state[llave_costo_trab] = "0"
+                                st.success(f"Costo de {trabajador_sel} añadido exitosamente.")
+                                st.rerun()
+            # ----------------------------------------------
+
             gastos_totales = pd.to_numeric(df_gastos_editados["Monto"], errors='coerce').sum()
             ganancia_proyecto = nuevo_cobro - gastos_totales
             
@@ -507,9 +531,13 @@ elif menu == "Proyectos":
                 with col_save:
                     if st.button("Guardar Cambios de Proyecto", type="primary", use_container_width=True):
                         st.session_state.proyectos_resumen.at[idx_proy, "Cobro"] = nuevo_cobro
+                        
+                        # Actualizar la ciudad si se editó manualmente en la base (opcional, pero útil)
+                        # Por ahora guardamos el cobro y los gastos de la tabla
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         df_gastos_editados["Proyecto"] = proyecto_seleccionado
                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_gastos_editados], ignore_index=True)
+                        
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                         st.success("Guardado correctamente.")
