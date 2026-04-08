@@ -10,75 +10,23 @@ import datetime
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
-# CSS Avanzado para limpieza visual extrema y corrección de logo
+# CSS Limpio: Solo ocultamos marcas de agua y damos aire superior
 ocultar_menu_estilo = """
             <style>
-            /* Ocultar menú de desarrollador y footer de Streamlit */
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
             
-            /* Ajustar el espaciado superior general */
+            /* Dar más espacio (aire) en la parte superior para que nada se corte */
             .block-container {
-                padding-top: 1.5rem !important;
+                padding-top: 2rem !important;
                 padding-bottom: 2rem !important;
             }
             
-            /* 1. ELIMINAR LA CIRCUNFERENCIA Y ESTILIZAR EL MENÚ SUPERIOR (NUEVO) */
-            /* Ocultar el indicador circular de selección (la "bolita" y el círculo) */
-            div[data-baseweb="radio"] > div:first-child {
-                display: none !important;
-            }
-            /* Asegurar que el fondo gris circular por defecto en hover desaparezca */
-            div[data-testid="stRadio"] > div {
-                background-color: transparent !important; 
-                padding: 0 !important;
-                border-radius: 0 !important;
-            }
-            /* Dar formato de pestañas (tabs) al texto del menú, ahora sin círculo */
-            div.row-widget.stRadio > div {
-                flex-direction: row;
-                justify-content: center;
-                gap: 10px;
-            }
-            div[data-baseweb="radio"] {
-                padding: 10px 20px;
-                border-radius: 6px;
-                background-color: #f0f2f6; /* Color de fondo suave */
-                margin-right: 5px;
-                border: 1px solid transparent;
-            }
-            div[data-baseweb="radio"]:hover {
-                background-color: #e0e2e6; /* Un poco más oscuro al pasar el mouse */
-                border-color: #d0d2d6;
-            }
-            /* Estilo para la pestaña seleccionada */
-            div[data-baseweb="radio"][aria-checked="true"] {
-                background-color: #004d99; /* Azul corporativo */
-                color: white !important;
-                font-weight: bold;
-            }
-            div[data-baseweb="radio"][aria-checked="true"] * {
-                color: white !important; /* Forzar texto blanco */
-            }
-
-            /* 2. CORREGIR LOGO CORTADO Y AJUSTE DE COLUMNAS (NUEVO) */
-            /* Forzar centrado vertical de todo el contenido de columna para evitar cortes */
+            /* Centrar verticalmente los elementos de la barra superior */
             [data-testid="column"] {
                 display: flex;
                 flex-direction: column;
-                justify-content: center; /* Centrar verticalmente */
-            }
-            /* Forzar que la imagen del logo no se estire demasiado y se centre */
-            [data-testid="column"] img {
-                max-height: 50px !important; /* Limitar altura máxima para que no se corte */
-                width: auto !important; /* Mantener proporción */
-                margin-left: auto; /* Centrar horizontalmente */
-                margin-right: auto;
-                display: block;
-            }
-            /* Asegurar que el popover de ajustes no se corte */
-            [data-testid="column"] .stPopoverButton button {
-                width: 100%; /* Forzar ancho completo */
+                justify-content: center;
             }
             </style>
             """
@@ -263,24 +211,22 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR Y BARRA DE ESTADO (TOP NAV)
+# 5. NAVEGACIÓN SUPERIOR (NUEVO DISEÑO DESPLEGABLE)
 # ==========================================
-# Rediseñamos las proporciones de las columnas para dar más espacio a los lados
-# Y forzamos flexbox para centrado vertical y que nada se corte
-col_logo, col_nav, col_settings = st.columns([1.5, 6, 1.5], vertical_alignment="center")
+# Proporciones más equilibradas: [2] para logo, [4] para menú, [2] para ajustes
+col_logo, col_nav, col_settings = st.columns([2, 4, 2], vertical_alignment="center")
 
 with col_logo:
-    # Usamos st.image de forma directa, el CSS flex y img se encargará de que no se corte
-    st.image(LOGO_URL)
+    # use_container_width permite que crezca naturalmente sin recortarse
+    st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
-    # Mantenemos el menú centralizado, el CSS nuevo asegura que sea el texto y no el círculo
+    # El selectbox ("flecha retraíble") reemplaza al radio button. Es más limpio.
     opciones_menu = ["💼 Finanzas", "📝 Presupuestos", "🏗️ Proyectos", "⏱️ Operaciones", "📊 Balance"]
-    menu_seleccionado = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
+    menu_seleccionado = st.selectbox("Módulo Activo", opciones_menu, label_visibility="collapsed")
 
 with col_settings:
-    # El popover se mantiene, el CSS asegura que esté centrado
-    with st.popover("⚙️ Ajustes", use_container_width=True):
+    with st.popover("⚙️ Ajustes de Sistema", use_container_width=True):
         st.markdown("**Opciones Globales**")
         if st.button("🔄 Sincronizar", use_container_width=True):
             for key in list(st.session_state.keys()):
