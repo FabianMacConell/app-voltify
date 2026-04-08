@@ -801,7 +801,7 @@ elif st.session_state.menu_actual == "Operaciones":
                                 st.rerun()
 
 # ==========================================
-# PANTALLA 5: BALANCE TOTAL (CON GRÁFICOS)
+# PANTALLA 5: BALANCE TOTAL (CON GRÁFICOS INTERACTIVOS)
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
     st.markdown("### 📊 Balance General y Estadísticas")
@@ -817,24 +817,21 @@ elif st.session_state.menu_actual == "Balance":
             col_f1, col_f2 = st.columns(2)
             tipo_vista = col_f1.selectbox("Seleccionar Escenario Contable:", ["Vista Mensual (Mes actual)", "Proyección Anual (12 meses)", "Histórico Global"])
             
-            # Cálculos base fijos
             ingresos_base = pd.to_numeric(st.session_state.proyectos_resumen["Cobro"], errors='coerce').sum() if not st.session_state.proyectos_resumen.empty else 0
             costos_proy_base = pd.to_numeric(st.session_state.proyectos_gastos["Monto"], errors='coerce').sum() if not st.session_state.proyectos_gastos.empty else 0
             df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
             fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
             
-            # Lógica de multiplicadores según el filtro
             if tipo_vista == "Vista Mensual (Mes actual)":
                 multiplicador = 1
                 ingresos_calc = ingresos_base
                 costos_proy_calc = costos_proy_base
             elif tipo_vista == "Proyección Anual (12 meses)":
                 multiplicador = 12
-                # Asumimos que los proyectos actuales son lo que se hace en el año, o se pueden multiplicar. Por sanidad, dejamos los ingresos fijos y multiplicamos los costos fijos.
                 ingresos_calc = ingresos_base
                 costos_proy_calc = costos_proy_base
                 st.caption("ℹ️ *La proyección anual multiplica tus sueldos y arriendos por 12 para estimar la carga fija del año.*")
-            else: # Histórico Global
+            else:
                 multiplicador = 1 
                 ingresos_calc = ingresos_base
                 costos_proy_calc = costos_proy_base
@@ -856,45 +853,48 @@ elif st.session_state.menu_actual == "Balance":
             else: st.info("⚖️ Análisis: La empresa se encuentra en su punto de equilibrio.")
             
         # ==========================================
-        # SECCIÓN GRÁFICA (ALTAIR)
+        # SECCIÓN GRÁFICA INTERACTIVA
         # ==========================================
         st.markdown("#### 📈 Dashboard de Rendimiento Financiero")
-        col_g1, col_g2 = st.columns(2)
         
-        with col_g1:
-            st.markdown("**Comparativa de Flujo de Caja**")
+        # --- NUEVO: SELECTOR DE GRÁFICO (EVITA SATURACIÓN VISUAL) ---
+        vista_grafico = st.selectbox("Seleccionar Gráfico a visualizar:", 
+                                     ["📊 Comparativa de Flujo de Caja (Ingresos vs Egresos)", 
+                                      "🍩 Desglose de Fugas de Capital (Distribución de Egresos)"])
+        
+        st.write("") # Espacio en blanco
+        
+        if vista_grafico == "📊 Comparativa de Flujo de Caja (Ingresos vs Egresos)":
             df_balance = pd.DataFrame({
                 "Categoría": ["Ingresos", "Egresos"],
                 "Monto": [ingresos_calc, egresos_totales],
-                "Color": ["#2ecc71", "#dc3545"] # Verde para Ingreso, Rojo para Egreso
+                "Color": ["#2ecc71", "#dc3545"] 
             })
             
-            chart_barras = alt.Chart(df_balance).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=60).encode(
-                x=alt.X("Categoría", sort=None, title="", axis=alt.Axis(labelAngle=0, labelFontSize=12)),
+            chart_barras = alt.Chart(df_balance).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=80).encode(
+                x=alt.X("Categoría", sort=None, title="", axis=alt.Axis(labelAngle=0, labelFontSize=14)),
                 y=alt.Y("Monto", title="Monto en CLP"),
                 color=alt.Color("Color", scale=None),
                 tooltip=["Categoría", "Monto"]
-            ).properties(height=350)
+            ).properties(height=400)
             
             st.altair_chart(chart_barras, use_container_width=True)
 
-        with col_g2:
-            st.markdown("**Desglose de Fugas de Capital (Egresos)**")
+        elif vista_grafico == "🍩 Desglose de Fugas de Capital (Distribución de Egresos)":
             df_egresos = pd.DataFrame({
                 "Tipo de Gasto": ["Nómina", "Gastos Fijos", "Costos Proyectos"],
                 "Monto": [costo_nomina_calc, fijos_calc, costos_proy_calc]
             })
-            # Filtramos los que sean 0 para no saturar el grafico
             df_egresos = df_egresos[df_egresos["Monto"] > 0]
             
             if not df_egresos.empty:
-                chart_donut = alt.Chart(df_egresos).mark_arc(innerRadius=60).encode(
+                chart_donut = alt.Chart(df_egresos).mark_arc(innerRadius=80).encode(
                     theta=alt.Theta(field="Monto", type="quantitative"),
                     color=alt.Color(field="Tipo de Gasto", type="nominal", 
                                     scale=alt.Scale(range=["#004d99", "#f39c12", "#e74c3c"]), 
-                                    legend=alt.Legend(orient="bottom", title="")),
+                                    legend=alt.Legend(orient="bottom", title="", labelFontSize=13)),
                     tooltip=["Tipo de Gasto", "Monto"]
-                ).properties(height=350)
+                ).properties(height=400)
                 
                 st.altair_chart(chart_donut, use_container_width=True)
             else:
