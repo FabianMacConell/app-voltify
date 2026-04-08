@@ -10,24 +10,52 @@ import datetime
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
-# CSS para un aspecto más limpio, ocultar marcas de agua y dar estilo corporativo
+# CSS Avanzado para limpieza visual extrema
 ocultar_menu_estilo = """
             <style>
+            /* Ocultar menú de desarrollador y footer de Streamlit */
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
             
-            /* Ajustar el espaciado superior para que el menú quede más arriba */
+            /* Ajustar el espaciado superior general */
             .block-container {
-                padding-top: 2rem;
-                padding-bottom: 2rem;
+                padding-top: 1.5rem !important;
+                padding-bottom: 2rem !important;
             }
             
-            /* Estilizar los radio buttons horizontales para que parezcan pestañas de navegación modernas */
+            /* 1. ELIMINAR LA CIRCUNFERENCIA Y ESTILIZAR EL MENÚ SUPERIOR */
+            /* Ocultamos el fondo gris circular por defecto de los radio buttons */
+            div[data-testid="stRadio"] > div {
+                background-color: transparent !important; 
+                padding: 0 !important;
+                border-radius: 0 !important;
+            }
+            /* Ocultar el indicador circular de selección (la "bolita" del radio) */
+            div[data-baseweb="radio"] > div:first-child {
+                display: none !important;
+            }
+            /* Dar formato de pestañas (tabs) al texto del menú */
             div.row-widget.stRadio > div {
                 flex-direction: row;
                 justify-content: center;
-                gap: 20px;
-                background-color: transparent;
+                gap: 10px;
+            }
+            div[data-baseweb="radio"] {
+                padding: 8px 16px;
+                border-radius: 6px;
+                background-color: #f0f2f6; /* Color de fondo suave para las opciones */
+                margin-right: 5px;
+            }
+            div[data-baseweb="radio"]:hover {
+                background-color: #e0e2e6; /* Un poco más oscuro al pasar el mouse */
+            }
+
+            /* 2. AJUSTE DEL LOGO Y EL BOTÓN DE SISTEMA */
+            /* Evitar que los elementos de las columnas superiores se corten */
+            [data-testid="column"] {
+                display: flex;
+                flex-direction: column;
+                justify-content: center; /* Centrar verticalmente el contenido de las columnas */
             }
             </style>
             """
@@ -214,28 +242,31 @@ if not st.session_state.acceso_app:
 # ==========================================
 # 5. NAVEGACIÓN SUPERIOR Y BARRA DE ESTADO (TOP NAV)
 # ==========================================
-col_logo, col_nav, col_settings = st.columns([1, 4, 1], vertical_alignment="center")
+# Rediseñamos las proporciones de las columnas para dar más espacio a los lados
+col_logo, col_nav, col_settings = st.columns([1.5, 6, 1.5], vertical_alignment="center")
 
 with col_logo:
-    st.image(LOGO_URL, width=120)
+    # Usamos use_container_width para que el logo se adapte bien sin cortarse
+    st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
-    opciones_menu = ["💼 Finanzas y Nómina", "📝 Presupuestos", "🏗️ Proyectos", "⏱️ Seguimiento Operativo", "📊 Balance Total"]
+    opciones_menu = ["💼 Finanzas", "📝 Presupuestos", "🏗️ Proyectos", "⏱️ Operaciones", "📊 Balance"]
     menu_seleccionado = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
 
 with col_settings:
-    with st.popover("⚙️ Sistema", use_container_width=True):
+    # Cambiamos "⚙️ Sistema" por algo más compacto si es necesario, o lo dejamos así
+    with st.popover("⚙️ Ajustes", use_container_width=True):
         st.markdown("**Opciones Globales**")
-        if st.button("🔄 Sincronizar Nube", use_container_width=True):
+        if st.button("🔄 Sincronizar", use_container_width=True):
             for key in list(st.session_state.keys()):
                 if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']:
                     del st.session_state[key]
             st.rerun()
-        if st.button("🔒 Bloquear Accesos", use_container_width=True):
+        if st.button("🔒 Bloquear", use_container_width=True):
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
             st.rerun()
-        if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        if st.button("🚪 Salir", use_container_width=True):
             st.session_state.acceso_app = False
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
@@ -246,7 +277,7 @@ st.divider()
 # ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
-if menu_seleccionado == "💼 Finanzas y Nómina":
+if menu_seleccionado == "💼 Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
     
     if st.session_state.acceso_finanzas == "ninguno":
@@ -613,7 +644,7 @@ elif menu_seleccionado == "🏗️ Proyectos":
 # ==========================================
 # PANTALLA 4: SEGUIMIENTO OPERATIVO
 # ==========================================
-elif menu_seleccionado == "⏱️ Seguimiento Operativo":
+elif menu_seleccionado == "⏱️ Operaciones":
     st.markdown("### Control y Seguimiento de Tareas")
     
     proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
@@ -694,7 +725,7 @@ elif menu_seleccionado == "⏱️ Seguimiento Operativo":
 # ==========================================
 # PANTALLA 5: BALANCE TOTAL
 # ==========================================
-elif menu_seleccionado == "📊 Balance Total":
+elif menu_seleccionado == "📊 Balance":
     st.markdown("### Balance General de la Empresa")
     
     if st.session_state.acceso_finanzas == "ninguno":
