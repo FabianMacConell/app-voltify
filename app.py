@@ -120,6 +120,11 @@ if 'proyectos_tareas' not in st.session_state:
     df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Horas_Estimadas", "Fecha_Inicio", "Fecha_Termino", "Estado"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
 
+# --- NUEVA BASE DE DATOS: SUBTAREAS ---
+if 'proyectos_subtareas' not in st.session_state:
+    df_subtareas_base = pd.DataFrame(columns=["Proyecto", "Tarea_Principal", "Subtarea", "Encargado", "Estado"])
+    st.session_state.proyectos_subtareas = cargar_datos("Proyectos_Subtareas", df_subtareas_base)
+
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
     st.session_state.gastos_fijos = cargar_datos("Gastos_Fijos", df_fijos_base)
@@ -183,63 +188,44 @@ def calcular_liquidaciones(df):
         })
     return pd.DataFrame(resultados), costo_empresa_total
 
-# --- MOTOR DE GENERACIÓN DE PDF ---
 def generar_pdf_liquidacion(datos):
     pdf = FPDF()
     pdf.add_page()
-    
-    # Encabezado
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(0, 10, "LIQUIDACION DE SUELDO", ln=True, align='C')
     pdf.ln(5)
-    
-    # Datos de la Empresa
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 8, "EMPRESA: VOLTIFY SpA", ln=True)
     pdf.set_font("Arial", '', 11)
     pdf.cell(0, 8, "Giro: Servicios de Ingenieria", ln=True)
     pdf.ln(5)
-    
-    # Datos del Trabajador
     pdf.set_font("Arial", 'B', 12)
-    # Limpiamos caracteres extraños por seguridad en ASCII
     trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1')
     pdf.cell(0, 8, f"TRABAJADOR: {trabajador_limpio}", ln=True)
     pdf.set_font("Arial", '', 11)
     pdf.cell(0, 8, f"Cargo: {datos['Cargo']}", ln=True)
     pdf.cell(0, 8, f"Tipo de Contrato: {datos['Contrato']}", ln=True)
     pdf.ln(10)
-    
-    # Tabla de montos
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(95, 10, "HABERES E IMPONIBLES", border=1, align='C')
     pdf.cell(95, 10, "DESCUENTOS LEGALES", border=1, ln=True, align='C')
-    
     pdf.set_font("Arial", '', 11)
     pdf.cell(95, 10, f" Total Imponible: {formato_clp(datos['Imponible Calculado'])}", border=1)
-    pdf.cell(95, 10, f" Descuentos (AFP/Salud/AFC): {formato_clp(datos['Descuentos Ley'])}", border=1, ln=True)
-    
+    pdf.cell(95, 10, f" Descuentos Ley: {formato_clp(datos['Descuentos Ley'])}", border=1, ln=True)
     pdf.cell(95, 10, f" Haberes No Imponibles: {formato_clp(datos['Haberes No Imponibles'])}", border=1)
     pdf.cell(95, 10, f" ", border=1, ln=True)
     pdf.ln(10)
-    
-    # Total Final
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 15, f"LIQUIDO A PAGAR: {formato_clp(datos['Líquido a Pagar'])}", border=1, ln=True, align='C')
-    
-    # Firmas
     pdf.ln(30)
     pdf.set_font("Arial", '', 11)
     pdf.cell(95, 10, "__________________________", align='C')
     pdf.cell(95, 10, "__________________________", align='C', ln=True)
     pdf.cell(95, 5, "Firma Empleador", align='C')
     pdf.cell(95, 5, "Firma Trabajador", align='C', ln=True)
-    
-    # Exportar a Bytes de forma segura
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
-    with open(temp_path, "rb") as f:
-        pdf_bytes = f.read()
+    with open(temp_path, "rb") as f: pdf_bytes = f.read()
     os.remove(temp_path)
     return pdf_bytes
 
@@ -270,11 +256,11 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR
+# 5. NAVEGACIÓN SUPERIOR (BOTONERA INTELIGENTE)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
-
 col_logo, col_nav, col_settings = st.columns([2, 7, 1.5], vertical_alignment="center")
+
 with col_logo: st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
@@ -395,7 +381,6 @@ if st.session_state.menu_actual == "Finanzas":
                 st.dataframe(df_liq_format, use_container_width=True)
                 st.info(f"**Costo Total Proyectado de Nómina:** {formato_clp(total_nomina_empresa)}")
                 
-                # --- NUEVA SECCIÓN DE PDF ---
                 st.divider()
                 st.markdown("#### 📄 Emisión de Liquidaciones (Formato PDF)")
                 if FPDF_DISPONIBLE:
@@ -403,17 +388,12 @@ if st.session_state.menu_actual == "Finanzas":
                     if trab_lista:
                         col_sel, col_btn = st.columns([3, 1], vertical_alignment="bottom")
                         trab_seleccionado = col_sel.selectbox("Seleccione un trabajador:", trab_lista)
-                        
                         datos_trabajador_pdf = df_liquidaciones[df_liquidaciones['Trabajador'] == trab_seleccionado].iloc[0]
                         pdf_generado_bytes = generar_pdf_liquidacion(datos_trabajador_pdf)
-                        
                         col_btn.download_button(
-                            label="⬇️ Descargar PDF",
-                            data=pdf_generado_bytes,
+                            label="⬇️ Descargar PDF", data=pdf_generado_bytes,
                             file_name=f"Liquidacion_{trab_seleccionado.replace(' ', '_')}.pdf",
-                            mime="application/pdf",
-                            type="primary",
-                            use_container_width=True
+                            mime="application/pdf", type="primary", use_container_width=True
                         )
                 else:
                     st.error("⚠️ La librería para crear PDFs no está instalada. Ejecuta 'pip install fpdf' o añádelo a tu requirements.txt")
@@ -462,7 +442,6 @@ elif st.session_state.menu_actual == "Presupuestos":
     with st.container(border=True):
         with st.expander("➕ Crear Nueva Cotización / Presupuesto", expanded=False):
             tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True)
-            
             colP1, colP2 = st.columns(2)
             if tipo_pres == "Asociada a un Proyecto":
                 proyectos_existentes = st.session_state.proyectos_resumen["Proyecto"].tolist()
@@ -507,7 +486,6 @@ elif st.session_state.menu_actual == "Presupuestos":
 
     with st.container(border=True):
         st.subheader("Panel de Seguimiento Comercial")
-        
         if st.session_state.presupuestos.empty:
             st.info("Aún no hay cotizaciones emitidas en el sistema.")
         else:
@@ -527,15 +505,13 @@ elif st.session_state.menu_actual == "Presupuestos":
                     "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión")
                 },
                 disabled=["Tipo", "Referencia", "Cliente"],
-                hide_index=True,
-                use_container_width=True,
-                key="ed_pres"
+                hide_index=True, use_container_width=True, key="ed_pres"
             )
             
             if st.button("💾 Guardar Estados Comerciales", type="primary"):
                 st.session_state.presupuestos = df_pres_edit
                 guardar_datos("Presupuestos", st.session_state.presupuestos)
-                st.success("Estados de presupuesto actualizados en la base de datos.")
+                st.success("Estados actualizados.")
                 
             with st.expander("🗑️ Eliminar un Presupuesto"):
                 lista_borrar_pres = [f"[{row['Estado_Comercial']}] {row['Referencia']} - {row['Cliente']} ({formato_clp(row['Monto'])})" for i, row in st.session_state.presupuestos.iterrows()]
@@ -562,14 +538,9 @@ elif st.session_state.menu_actual == "Proyectos":
                 u_proy = st.text_input("Usuario (Proyectos)")
                 p_proy = st.text_input("Clave", type="password", key="p_proy")
                 if st.button("Desbloquear Módulo", type="primary"):
-                    if (u_proy == "master" and p_proy == "123") or (u_proy == "admin_proy" and p_proy == "admin123"):
-                        st.session_state.acceso_proyectos = "admin"
-                        st.rerun()
-                    elif (u_proy == "obs_proy" and p_proy == "obs123"):
-                        st.session_state.acceso_proyectos = "observador"
-                        st.rerun()
-                    else:
-                        st.error("Credenciales incorrectas.")
+                    if (u_proy == "master" and p_proy == "123") or (u_proy == "admin_proy" and p_proy == "admin123"): st.session_state.acceso_proyectos = "admin"; st.rerun()
+                    elif (u_proy == "obs_proy" and p_proy == "obs123"): st.session_state.acceso_proyectos = "observador"; st.rerun()
+                    else: st.error("Credenciales incorrectas.")
     else:
         if st.session_state.acceso_proyectos == "admin":
             with st.container(border=True):
@@ -577,7 +548,6 @@ elif st.session_state.menu_actual == "Proyectos":
                     colA, colB = st.columns(2)
                     nombre_p = colA.text_input("Nombre de la Obra o Proyecto")
                     empresa_p = colB.text_input("Nombre de la Empresa / Cliente")
-                    
                     colC, colD = st.columns(2)
                     ciudad_p = colC.text_input("Ciudad de ejecución")
                     oc_p = colD.text_input("N° Orden de Compra (Si la tienes)", placeholder="Ej: OC-4567")
@@ -596,7 +566,6 @@ elif st.session_state.menu_actual == "Proyectos":
                             st.rerun()
 
         proyectos_lista = st.session_state.proyectos_resumen["Proyecto"].tolist()
-        
         if proyectos_lista:
             proyecto_seleccionado = st.selectbox("📂 Selecciona un proyecto para abrir:", proyectos_lista)
             idx_proy = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seleccionado].index[0]
@@ -620,8 +589,7 @@ elif st.session_state.menu_actual == "Proyectos":
                     else:
                         st.info(f"N° OC: {oc_actual}")
                         st.info(f"Cobro Total: {formato_clp(cobro_actual)}")
-                        nueva_oc = oc_actual
-                        nuevo_cobro = cobro_actual
+                        nueva_oc = oc_actual; nuevo_cobro = cobro_actual
 
             with col_der:
                 with st.container(border=True):
@@ -639,7 +607,6 @@ elif st.session_state.menu_actual == "Proyectos":
                         trabajadores = ["Seleccione..."] + df_liq["Trabajador"].tolist()
                         colT1, colT2, colT3 = st.columns([2, 1, 1])
                         trabajador_sel = colT1.selectbox("Trabajador", trabajadores)
-                        
                         if trabajador_sel != "Seleccione...":
                             costo_emp_trab = df_liq[df_liq["Trabajador"] == trabajador_sel]["Costo Empresa"].values[0]
                             colT2.info(f"Costo Mensual: \n**{formato_clp(costo_emp_trab)}**")
@@ -647,7 +614,6 @@ elif st.session_state.menu_actual == "Proyectos":
                             if llave_costo not in st.session_state: st.session_state[llave_costo] = "0"
                             colT3.text_input("A imputar al proyecto:", key=llave_costo, on_change=formatear_input, kwargs={'llave': llave_costo})
                             monto_asig = float(st.session_state[llave_costo].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-                            
                             if st.button("Añadir al Gasto", type="secondary") and monto_asig > 0:
                                 nuevo_gasto_trab = pd.DataFrame([{"Proyecto": proyecto_seleccionado, "Detalle_Gasto": f"Mano de obra: {trabajador_sel}", "Monto": monto_asig}])
                                 st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
@@ -678,11 +644,16 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.success("Guardado correctamente.")
                 with col_del:
                     if st.button("🗑️ Eliminar Proyecto", use_container_width=True):
+                        # Efecto Dominó: Borra Proyecto, Gastos, Tareas y SUBTAREAS
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado]
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         if 'proyectos_tareas' in st.session_state:
                             st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] != proyecto_seleccionado]
                             guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                        if 'proyectos_subtareas' in st.session_state:
+                            st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[st.session_state.proyectos_subtareas["Proyecto"] != proyecto_seleccionado]
+                            guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
+                            
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                         st.rerun()
@@ -700,22 +671,21 @@ elif st.session_state.menu_actual == "Operaciones":
             st.warning("No hay proyectos creados. Ve a 'Proyectos' para crear tu primera obra.")
     else:
         proyecto_seg = st.selectbox("Selecciona un Proyecto:", proyectos_lista_seg)
+        df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
+        trabajadores_seg = ["Seleccione..."] + df_liq["Trabajador"].tolist()
         
         with st.container(border=True):
-            with st.expander("➕ Crear y Asignar Tarea", expanded=False):
-                df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
-                trabajadores_seg = ["Seleccione..."] + df_liq["Trabajador"].tolist()
-                
+            with st.expander("➕ Crear Tarea Principal", expanded=False):
                 colS1, colS2 = st.columns(2)
-                trab_asignado = colS1.selectbox("Asignar a Trabajador:", trabajadores_seg)
-                desc_tarea = colS2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalación de tuberías...")
+                trab_asignado = colS1.selectbox("Líder de la Tarea:", trabajadores_seg)
+                desc_tarea = colS2.text_input("Descripción de la Tarea Principal:", placeholder="Ej: Fase 1: Obra Gruesa")
                 
                 colS3, colS4, colS5 = st.columns(3)
-                h_estimadas = colS3.number_input("Horas Estimadas:", min_value=1, step=1, value=8)
+                h_estimadas = colS3.number_input("Horas Estimadas Totales:", min_value=1, step=1, value=8)
                 f_inicio = colS4.date_input("Fecha de Inicio:")
                 f_termino = colS5.date_input("Fecha de Término:")
                 
-                if st.button("Añadir Tarea", type="primary"):
+                if st.button("Añadir Tarea Principal", type="primary"):
                     if trab_asignado != "Seleccione..." and desc_tarea:
                         nueva_tarea = pd.DataFrame([{
                             "Proyecto": proyecto_seg, "Trabajador": trab_asignado, "Tarea": desc_tarea,
@@ -727,15 +697,15 @@ elif st.session_state.menu_actual == "Operaciones":
                         st.success("Tarea asignada y guardada con éxito.")
                         st.rerun()
                     else:
-                        st.error("Debes seleccionar un trabajador y escribir una descripción.")
+                        st.error("Debes seleccionar un líder y escribir una descripción.")
 
         with st.container(border=True):
-            st.subheader(f"Panel de Progreso")
+            st.subheader(f"Panel de Progreso Principal")
             mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
             df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
             
             if df_tareas_filtradas.empty:
-                st.info("Aún no has asignado tareas para este proyecto.")
+                st.info("Aún no has asignado tareas principales para este proyecto.")
             else:
                 st.caption("Modifica el Estado, las Horas o las Fechas haciendo clic en las celdas:")
                 df_tareas_editadas = st.data_editor(
@@ -747,27 +717,94 @@ elif st.session_state.menu_actual == "Operaciones":
                         "Fecha_Termino": st.column_config.TextColumn("F. Término"),
                     },
                     disabled=["Proyecto", "Trabajador", "Tarea"],
-                    hide_index=True,
-                    use_container_width=True,
-                    key=f"ed_tar_{proyecto_seg}"
+                    hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
                 )
                 
-                if st.button("💾 Guardar Progreso", type="primary"):
+                if st.button("💾 Guardar Progreso Principal", type="primary"):
                     st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
                     st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
                     guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                    st.success("Progreso y estados actualizados en la base de datos.")
+                    st.success("Estados actualizados.")
                     
-                with st.expander("🗑️ Eliminar una Tarea Específica", expanded=False):
+                with st.expander("🗑️ Eliminar una Tarea Principal", expanded=False):
                     lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
                     if lista_nombres_tareas:
                         tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
                         if st.button("Eliminar Tarea Seleccionada"):
+                            # Eliminar tarea principal
                             mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
                             st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
+                            # Efecto Dominó: Eliminar sus subtareas
+                            mask_elim_sub = (st.session_state.proyectos_subtareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_subtareas["Tarea_Principal"] == tarea_a_eliminar)
+                            st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[~mask_elim_sub]
+                            
                             guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                            st.success("Tarea eliminada correctamente.")
+                            guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
+                            st.success("Tarea y subtareas eliminadas correctamente.")
                             st.rerun()
+
+        # --- SECCIÓN DE SUBTAREAS ---
+        if not df_tareas_filtradas.empty:
+            st.divider()
+            st.markdown("#### 📋 Desglose de Subtareas")
+            lista_tareas_main = df_tareas_filtradas["Tarea"].tolist()
+            
+            tarea_seleccionada = st.selectbox("Selecciona una Tarea Principal para gestionar sus subtareas:", lista_tareas_main)
+            
+            with st.container(border=True):
+                with st.expander(f"➕ Añadir nueva subtarea a: {tarea_seleccionada}", expanded=False):
+                    colSub1, colSub2 = st.columns([1, 2])
+                    sub_encargado = colSub1.selectbox("Asignar Subtarea a:", trabajadores_seg, key="sel_sub_enc")
+                    sub_desc = colSub2.text_input("Descripción de la Subtarea:", key="txt_sub_desc", placeholder="Ej: Compra de materiales")
+                    
+                    if st.button("Añadir Subtarea", type="secondary"):
+                        if sub_encargado != "Seleccione..." and sub_desc:
+                            nueva_subtarea = pd.DataFrame([{
+                                "Proyecto": proyecto_seg, "Tarea_Principal": tarea_seleccionada,
+                                "Subtarea": sub_desc, "Encargado": sub_encargado, "Estado": "Pendiente"
+                            }])
+                            st.session_state.proyectos_subtareas = pd.concat([st.session_state.proyectos_subtareas, nueva_subtarea], ignore_index=True)
+                            guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
+                            st.success("Subtarea añadida exitosamente.")
+                            st.rerun()
+                        else:
+                            st.error("Selecciona un encargado y escribe la descripción.")
+                
+                # Mostrar tabla de subtareas
+                mask_subtareas = (st.session_state.proyectos_subtareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_subtareas["Tarea_Principal"] == tarea_seleccionada)
+                df_sub_filtradas = st.session_state.proyectos_subtareas[mask_subtareas].copy()
+                
+                if df_sub_filtradas.empty:
+                    st.info("Aún no hay subtareas desglosadas para esta actividad.")
+                else:
+                    st.caption("Cambia el estado de las subtareas:")
+                    df_sub_editadas = st.data_editor(
+                        df_sub_filtradas,
+                        column_config={
+                            "Estado": st.column_config.SelectboxColumn("Estado Subtarea", options=["Pendiente", "En proceso", "Terminada"]),
+                        },
+                        disabled=["Proyecto", "Tarea_Principal", "Subtarea", "Encargado"],
+                        hide_index=True, use_container_width=True, key=f"ed_sub_{tarea_seleccionada}"
+                    )
+                    
+                    if st.button("💾 Guardar Estados de Subtareas"):
+                        st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[~mask_subtareas]
+                        st.session_state.proyectos_subtareas = pd.concat([st.session_state.proyectos_subtareas, df_sub_editadas], ignore_index=True)
+                        guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
+                        st.success("Subtareas actualizadas.")
+                    
+                    with st.expander("🗑️ Eliminar una Subtarea Específica"):
+                        lista_sub_nombres = df_sub_filtradas["Subtarea"].tolist()
+                        if lista_sub_nombres:
+                            sub_a_eliminar = st.selectbox("Selecciona la subtarea a borrar:", lista_sub_nombres)
+                            if st.button("Eliminar Subtarea"):
+                                mask_elim_sub_esp = (st.session_state.proyectos_subtareas["Proyecto"] == proyecto_seg) & \
+                                                (st.session_state.proyectos_subtareas["Tarea_Principal"] == tarea_seleccionada) & \
+                                                (st.session_state.proyectos_subtareas["Subtarea"] == sub_a_eliminar)
+                                st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[~mask_elim_sub_esp]
+                                guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
+                                st.success("Subtarea eliminada.")
+                                st.rerun()
 
 # ==========================================
 # PANTALLA 5: BALANCE TOTAL
