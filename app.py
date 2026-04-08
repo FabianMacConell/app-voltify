@@ -4,25 +4,29 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import datetime
+import os
+import tempfile
+
+# Intentar importar FPDF de forma segura
+try:
+    from fpdf import FPDF
+    FPDF_DISPONIBLE = True
+except ImportError:
+    FPDF_DISPONIBLE = False
 
 # ==========================================
 # 1. CONFIGURACIÓN E IDENTIDAD VISUAL
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
-# CSS Minimalista: Solo ocultamos marcas de agua y damos aire al logo
 ocultar_menu_estilo = """
             <style>
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
-            
-            /* Aire superior para que nada quede pegado al borde del navegador */
             .block-container {
                 padding-top: 2rem !important;
                 padding-bottom: 2rem !important;
             }
-            
-            /* Forzar que el logo nunca se corte y mantenga su proporción */
             [data-testid="column"] img {
                 max-height: 45px !important;
                 width: auto !important;
@@ -41,10 +45,8 @@ def conectar_google_sheets():
     try:
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         secreto = st.secrets["google_credentials"]
-        
         if isinstance(secreto, str): creds_dict = json.loads(secreto.strip())
         else: creds_dict = dict(secreto)
-            
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
         return client.open("Base de Datos Voltify")
@@ -65,12 +67,9 @@ def guardar_datos(nombre_hoja, df):
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
         
-        if 'Gratificacion' in df_clean.columns: df_clean['Gratificacion'] = df_clean['Gratificacion'].astype(str)
-        if 'Tipo_Contrato' in df_clean.columns: df_clean['Tipo_Contrato'] = df_clean['Tipo_Contrato'].astype(str)
-        if 'Fecha_Inicio' in df_clean.columns: df_clean['Fecha_Inicio'] = df_clean['Fecha_Inicio'].astype(str)
-        if 'Fecha_Termino' in df_clean.columns: df_clean['Fecha_Termino'] = df_clean['Fecha_Termino'].astype(str)
-        if 'Fecha_Emision' in df_clean.columns: df_clean['Fecha_Emision'] = df_clean['Fecha_Emision'].astype(str)
-        if 'Num_OC' in df_clean.columns: df_clean['Num_OC'] = df_clean['Num_OC'].astype(str)
+        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC']
+        for col in columnas_str:
+            if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
             
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
@@ -184,6 +183,66 @@ def calcular_liquidaciones(df):
         })
     return pd.DataFrame(resultados), costo_empresa_total
 
+# --- MOTOR DE GENERACIÓN DE PDF ---
+def generar_pdf_liquidacion(datos):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Encabezado
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, "LIQUIDACION DE SUELDO", ln=True, align='C')
+    pdf.ln(5)
+    
+    # Datos de la Empresa
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "EMPRESA: VOLTIFY SpA", ln=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(0, 8, "Giro: Servicios de Ingenieria", ln=True)
+    pdf.ln(5)
+    
+    # Datos del Trabajador
+    pdf.set_font("Arial", 'B', 12)
+    # Limpiamos caracteres extraños por seguridad en ASCII
+    trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1')
+    pdf.cell(0, 8, f"TRABAJADOR: {trabajador_limpio}", ln=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(0, 8, f"Cargo: {datos['Cargo']}", ln=True)
+    pdf.cell(0, 8, f"Tipo de Contrato: {datos['Contrato']}", ln=True)
+    pdf.ln(10)
+    
+    # Tabla de montos
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(95, 10, "HABERES E IMPONIBLES", border=1, align='C')
+    pdf.cell(95, 10, "DESCUENTOS LEGALES", border=1, ln=True, align='C')
+    
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(95, 10, f" Total Imponible: {formato_clp(datos['Imponible Calculado'])}", border=1)
+    pdf.cell(95, 10, f" Descuentos (AFP/Salud/AFC): {formato_clp(datos['Descuentos Ley'])}", border=1, ln=True)
+    
+    pdf.cell(95, 10, f" Haberes No Imponibles: {formato_clp(datos['Haberes No Imponibles'])}", border=1)
+    pdf.cell(95, 10, f" ", border=1, ln=True)
+    pdf.ln(10)
+    
+    # Total Final
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 15, f"LIQUIDO A PAGAR: {formato_clp(datos['Líquido a Pagar'])}", border=1, ln=True, align='C')
+    
+    # Firmas
+    pdf.ln(30)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(95, 10, "__________________________", align='C')
+    pdf.cell(95, 10, "__________________________", align='C', ln=True)
+    pdf.cell(95, 5, "Firma Empleador", align='C')
+    pdf.cell(95, 5, "Firma Trabajador", align='C', ln=True)
+    
+    # Exportar a Bytes de forma segura
+    temp_path = tempfile.mktemp(suffix=".pdf")
+    pdf.output(temp_path)
+    with open(temp_path, "rb") as f:
+        pdf_bytes = f.read()
+    os.remove(temp_path)
+    return pdf_bytes
+
 # ==========================================
 # 4. CONTROL DE ACCESOS Y PANTALLA DE LOGIN
 # ==========================================
@@ -211,46 +270,27 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (BOTONERA INTELIGENTE)
+# 5. NAVEGACIÓN SUPERIOR
 # ==========================================
-# Iniciamos el estado del menú si no existe
-if 'menu_actual' not in st.session_state:
-    st.session_state.menu_actual = "Finanzas"
+if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-# Distribuimos el espacio: 20% Logo, 70% Botones, 10% Ajustes
 col_logo, col_nav, col_settings = st.columns([2, 7, 1.5], vertical_alignment="center")
-
-with col_logo:
-    st.image(LOGO_URL, use_container_width=True)
+with col_logo: st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
-    # Subdividimos el espacio del medio en 5 columnas iguales para los botones
     b1, b2, b3, b4, b5 = st.columns(5)
-    
-    # Cada botón se pinta de "primary" (azul) si está seleccionado, o "secondary" (gris) si no.
-    if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True):
-        st.session_state.menu_actual = "Finanzas"
-        st.rerun()
-    if b2.button("📝 Presupuestos", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True):
-        st.session_state.menu_actual = "Presupuestos"
-        st.rerun()
-    if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True):
-        st.session_state.menu_actual = "Proyectos"
-        st.rerun()
-    if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True):
-        st.session_state.menu_actual = "Operaciones"
-        st.rerun()
-    if b5.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True):
-        st.session_state.menu_actual = "Balance"
-        st.rerun()
+    if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
+    if b2.button("📝 Presupuestos", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
+    if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
+    if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True): st.session_state.menu_actual = "Operaciones"; st.rerun()
+    if b5.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True): st.session_state.menu_actual = "Balance"; st.rerun()
 
 with col_settings:
     with st.popover("⚙️ Ajustes", use_container_width=True):
         st.markdown("**Opciones Globales**")
         if st.button("🔄 Sincronizar", use_container_width=True):
             for key in list(st.session_state.keys()):
-                if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']:
-                    del st.session_state[key]
+                if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']: del st.session_state[key]
             st.rerun()
         if st.button("🔒 Bloquear", use_container_width=True):
             st.session_state.acceso_finanzas = "ninguno"
@@ -261,7 +301,6 @@ with col_settings:
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
             st.rerun()
-
 st.divider()
 
 # ==========================================
@@ -269,7 +308,6 @@ st.divider()
 # ==========================================
 if st.session_state.menu_actual == "Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
-    
     if st.session_state.acceso_finanzas == "ninguno":
         with st.container(border=True):
             st.info("🔒 Ingresa credenciales de administrador para desbloquear este módulo.")
@@ -278,14 +316,9 @@ if st.session_state.menu_actual == "Finanzas":
                 u_fin = st.text_input("Usuario (Finanzas)")
                 p_fin = st.text_input("Clave", type="password", key="p_fin")
                 if st.button("Desbloquear Módulo", type="primary"):
-                    if (u_fin == "master" and p_fin == "123") or (u_fin == "admin_fin" and p_fin == "admin123"):
-                        st.session_state.acceso_finanzas = "admin"
-                        st.rerun()
-                    elif (u_fin == "obs_fin" and p_fin == "obs123"):
-                        st.session_state.acceso_finanzas = "observador"
-                        st.rerun()
-                    else:
-                        st.error("Credenciales incorrectas.")
+                    if (u_fin == "master" and p_fin == "123") or (u_fin == "admin_fin" and p_fin == "admin123"): st.session_state.acceso_finanzas = "admin"; st.rerun()
+                    elif (u_fin == "obs_fin" and p_fin == "obs123"): st.session_state.acceso_finanzas = "observador"; st.rerun()
+                    else: st.error("Credenciales incorrectas.")
     else:
         if st.session_state.acceso_finanzas == "observador": st.warning("👁️ MODO OBSERVADOR: Visualización en modo lectura.")
             
@@ -361,6 +394,29 @@ if st.session_state.menu_actual == "Finanzas":
                     df_liq_format[col] = df_liq_format[col].apply(formato_clp)
                 st.dataframe(df_liq_format, use_container_width=True)
                 st.info(f"**Costo Total Proyectado de Nómina:** {formato_clp(total_nomina_empresa)}")
+                
+                # --- NUEVA SECCIÓN DE PDF ---
+                st.divider()
+                st.markdown("#### 📄 Emisión de Liquidaciones (Formato PDF)")
+                if FPDF_DISPONIBLE:
+                    trab_lista = df_liquidaciones['Trabajador'].tolist()
+                    if trab_lista:
+                        col_sel, col_btn = st.columns([3, 1], vertical_alignment="bottom")
+                        trab_seleccionado = col_sel.selectbox("Seleccione un trabajador:", trab_lista)
+                        
+                        datos_trabajador_pdf = df_liquidaciones[df_liquidaciones['Trabajador'] == trab_seleccionado].iloc[0]
+                        pdf_generado_bytes = generar_pdf_liquidacion(datos_trabajador_pdf)
+                        
+                        col_btn.download_button(
+                            label="⬇️ Descargar PDF",
+                            data=pdf_generado_bytes,
+                            file_name=f"Liquidacion_{trab_seleccionado.replace(' ', '_')}.pdf",
+                            mime="application/pdf",
+                            type="primary",
+                            use_container_width=True
+                        )
+                else:
+                    st.error("⚠️ La librería para crear PDFs no está instalada. Ejecuta 'pip install fpdf' o añádelo a tu requirements.txt")
 
         with tab_fijos:
             with st.container(border=True):
@@ -483,14 +539,14 @@ elif st.session_state.menu_actual == "Presupuestos":
                 
             with st.expander("🗑️ Eliminar un Presupuesto"):
                 lista_borrar_pres = [f"[{row['Estado_Comercial']}] {row['Referencia']} - {row['Cliente']} ({formato_clp(row['Monto'])})" for i, row in st.session_state.presupuestos.iterrows()]
-                pres_a_borrar = st.selectbox("Selecciona la cotización a eliminar:", lista_borrar_pres)
-                
-                if st.button("Eliminar Presupuesto Definitivamente"):
-                    idx_borrar = lista_borrar_pres.index(pres_a_borrar)
-                    st.session_state.presupuestos = st.session_state.presupuestos.drop(st.session_state.presupuestos.index[idx_borrar]).reset_index(drop=True)
-                    guardar_datos("Presupuestos", st.session_state.presupuestos)
-                    st.success("Cotización eliminada correctamente.")
-                    st.rerun()
+                if lista_borrar_pres:
+                    pres_a_borrar = st.selectbox("Selecciona la cotización a eliminar:", lista_borrar_pres)
+                    if st.button("Eliminar Presupuesto Definitivamente"):
+                        idx_borrar = lista_borrar_pres.index(pres_a_borrar)
+                        st.session_state.presupuestos = st.session_state.presupuestos.drop(st.session_state.presupuestos.index[idx_borrar]).reset_index(drop=True)
+                        guardar_datos("Presupuestos", st.session_state.presupuestos)
+                        st.success("Cotización eliminada correctamente.")
+                        st.rerun()
 
 # ==========================================
 # PANTALLA 3: PROYECTOS
@@ -704,13 +760,14 @@ elif st.session_state.menu_actual == "Operaciones":
                     
                 with st.expander("🗑️ Eliminar una Tarea Específica", expanded=False):
                     lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
-                    tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
-                    if st.button("Eliminar Tarea Seleccionada"):
-                        mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
-                        st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
-                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                        st.success("Tarea eliminada correctamente.")
-                        st.rerun()
+                    if lista_nombres_tareas:
+                        tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
+                        if st.button("Eliminar Tarea Seleccionada"):
+                            mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
+                            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
+                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                            st.success("Tarea eliminada correctamente.")
+                            st.rerun()
 
 # ==========================================
 # PANTALLA 5: BALANCE TOTAL
