@@ -6,6 +6,7 @@ import json
 import datetime
 import os
 import tempfile
+import altair as alt
 
 # Intentar importar FPDF de forma segura
 try:
@@ -661,7 +662,7 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 4: SEGUIMIENTO OPERATIVO (NUEVO FLUJO VINCULADO)
+# PANTALLA 4: SEGUIMIENTO OPERATIVO
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
     st.markdown("### ⏱️ Gestión Operativa del Proyecto")
@@ -675,7 +676,6 @@ elif st.session_state.menu_actual == "Operaciones":
         proyecto_seg = st.selectbox("Selecciona un Proyecto a gestionar:", proyectos_lista_seg)
         idx_p_seg = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seg].index[0]
         
-        # 1. CRONOGRAMA GENERAL
         with st.container(border=True):
             st.markdown("#### 1️⃣ Cronograma General del Proyecto")
             colF1, colF2, colF3 = st.columns(3)
@@ -695,11 +695,8 @@ elif st.session_state.menu_actual == "Operaciones":
                 guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                 st.success("Cronograma actualizado.")
                 
-        # 2. EQUIPO ASIGNADO (VINCULACIÓN AUTOMÁTICA)
         with st.container(border=True):
             st.markdown("#### 2️⃣ Conformación del Equipo y Liderazgo")
-            
-            # Buscar automáticamente a quienes se les asignó dinero en "Proyectos"
             gastos_proy_seg = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == proyecto_seg]
             trabajadores_financiados = []
             for detalle in gastos_proy_seg["Detalle_Gasto"]:
@@ -709,9 +706,8 @@ elif st.session_state.menu_actual == "Operaciones":
                         trabajadores_financiados.append(nombre)
                         
             if not trabajadores_financiados:
-                st.warning("⚠️ No has asignado presupuesto de personal a este proyecto. Ve a la pestaña **Proyectos**, abre esta obra y usa **'Asignar Personal y Cargar al Gasto'** para que aparezcan aquí.")
+                st.warning("⚠️ No has asignado presupuesto de personal a este proyecto. Ve a la pestaña **Proyectos**, abre esta obra y usa **'Asignar Personal y Cargar al Gasto'** para habilitar al equipo operativamente.")
             else:
-                # Sincronización Inteligente: Agregar los nuevos a proyectos_equipo y quitar los que ya no están financiados
                 equipo_actual = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg]
                 trabajadores_en_equipo = equipo_actual["Trabajador"].tolist()
                 
@@ -731,8 +727,6 @@ elif st.session_state.menu_actual == "Operaciones":
                     guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
                 
                 st.write("Estos trabajadores fueron financiados para el proyecto. Asígnales su rol operativo correspondiente:")
-                
-                # Cargar datos frescos para editar
                 mask_eq = st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg
                 df_eq_editar = st.session_state.proyectos_equipo[mask_eq]
                 
@@ -750,17 +744,13 @@ elif st.session_state.menu_actual == "Operaciones":
                     guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
                     st.success("Roles del equipo actualizados.")
 
-        # 3. TAREAS ESPECÍFICAS Y PANEL DE CONTROL
         with st.container(border=True):
             st.markdown("#### 3️⃣ Asignación de Tareas Específicas")
-            
-            # Solo podemos asignar tareas si hay gente financiada
             if not trabajadores_financiados:
                 st.info("El equipo debe estar conformado para asignar tareas.")
             else:
                 with st.expander("➕ Añadir Nueva Tarea", expanded=False):
                     colT1, colT2 = st.columns([1, 2])
-                    # Desplegable 100% enlazado al equipo real
                     encargado_tarea = colT1.selectbox("Asignar a:", trabajadores_financiados)
                     desc_tarea = colT2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalar tablero eléctrico principal")
                     
@@ -801,39 +791,111 @@ elif st.session_state.menu_actual == "Operaciones":
                         
                     with st.expander("🗑️ Eliminar una Tarea"):
                         lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
-                        tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
-                        if st.button("Eliminar Tarea Seleccionada"):
-                            mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
-                            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
-                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                            st.success("Tarea eliminada correctamente.")
-                            st.rerun()
+                        if lista_nombres_tareas:
+                            tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
+                            if st.button("Eliminar Tarea Seleccionada"):
+                                mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
+                                st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
+                                guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                                st.success("Tarea eliminada correctamente.")
+                                st.rerun()
 
 # ==========================================
-# PANTALLA 5: BALANCE TOTAL
+# PANTALLA 5: BALANCE TOTAL (CON GRÁFICOS)
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
-    st.markdown("### Balance General de la Empresa")
+    st.markdown("### 📊 Balance General y Estadísticas")
     
     if st.session_state.acceso_finanzas == "ninguno":
         with st.container(border=True):
             st.warning("🔒 Esta sección consolida información confidencial de Voltify.")
-            st.info("Por favor, ve a la pestaña 'Finanzas y Nómina' e inicia sesión para desbloquear el Balance Total.")
+            st.info("Por favor, ve a la pestaña 'Finanzas' e inicia sesión para desbloquear el Balance Total.")
     else:
-        ingresos = pd.to_numeric(st.session_state.proyectos_resumen["Cobro"], errors='coerce').sum() if not st.session_state.proyectos_resumen.empty else 0
-        costos_proy = pd.to_numeric(st.session_state.proyectos_gastos["Monto"], errors='coerce').sum() if not st.session_state.proyectos_gastos.empty else 0
-        df_liq, costo_nomina_total = calcular_liquidaciones(st.session_state.nomina)
-        fijos = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
-        
-        egresos_totales = costos_proy + costo_nomina_total + fijos
-        rentabilidad = ingresos - egresos_totales
-        
         with st.container(border=True):
+            st.write("Filtra la información para ver el rendimiento en distintos periodos:")
+            
+            col_f1, col_f2 = st.columns(2)
+            tipo_vista = col_f1.selectbox("Seleccionar Escenario Contable:", ["Vista Mensual (Mes actual)", "Proyección Anual (12 meses)", "Histórico Global"])
+            
+            # Cálculos base fijos
+            ingresos_base = pd.to_numeric(st.session_state.proyectos_resumen["Cobro"], errors='coerce').sum() if not st.session_state.proyectos_resumen.empty else 0
+            costos_proy_base = pd.to_numeric(st.session_state.proyectos_gastos["Monto"], errors='coerce').sum() if not st.session_state.proyectos_gastos.empty else 0
+            df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
+            fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
+            
+            # Lógica de multiplicadores según el filtro
+            if tipo_vista == "Vista Mensual (Mes actual)":
+                multiplicador = 1
+                ingresos_calc = ingresos_base
+                costos_proy_calc = costos_proy_base
+            elif tipo_vista == "Proyección Anual (12 meses)":
+                multiplicador = 12
+                # Asumimos que los proyectos actuales son lo que se hace en el año, o se pueden multiplicar. Por sanidad, dejamos los ingresos fijos y multiplicamos los costos fijos.
+                ingresos_calc = ingresos_base
+                costos_proy_calc = costos_proy_base
+                st.caption("ℹ️ *La proyección anual multiplica tus sueldos y arriendos por 12 para estimar la carga fija del año.*")
+            else: # Histórico Global
+                multiplicador = 1 
+                ingresos_calc = ingresos_base
+                costos_proy_calc = costos_proy_base
+                
+            costo_nomina_calc = costo_nomina_mensual * multiplicador
+            fijos_calc = fijos_mensuales * multiplicador
+            
+            egresos_totales = costos_proy_calc + costo_nomina_calc + fijos_calc
+            rentabilidad = ingresos_calc - egresos_totales
+            
+            st.divider()
             c1, c2, c3 = st.columns(3)
-            c1.metric("Ingresos Globales (Proyectos)", formato_clp(ingresos))
+            c1.metric("Ingresos Totales (Proyectos)", formato_clp(ingresos_calc))
             c2.metric("Egresos Totales (Proy + Nómina + Fijos)", formato_clp(egresos_totales))
             c3.metric("Utilidad Neta / Rentabilidad", formato_clp(rentabilidad))
+            
+            if rentabilidad > 0: st.success("📈 Análisis: La empresa se encuentra en números verdes (Rentable).")
+            elif rentabilidad < 0: st.error(f"📉 Alerta: Los gastos superan a los ingresos en {formato_clp(abs(rentabilidad))}.")
+            else: st.info("⚖️ Análisis: La empresa se encuentra en su punto de equilibrio.")
+            
+        # ==========================================
+        # SECCIÓN GRÁFICA (ALTAIR)
+        # ==========================================
+        st.markdown("#### 📈 Dashboard de Rendimiento Financiero")
+        col_g1, col_g2 = st.columns(2)
         
-        if rentabilidad > 0: st.success("📈 Análisis: La empresa se encuentra en números verdes (Rentable).")
-        elif rentabilidad < 0: st.error(f"📉 Alerta: Los gastos superan a los ingresos operativos en {formato_clp(abs(rentabilidad))}.")
-        else: st.info("⚖️ Análisis: La empresa se encuentra en su punto de equilibrio.")
+        with col_g1:
+            st.markdown("**Comparativa de Flujo de Caja**")
+            df_balance = pd.DataFrame({
+                "Categoría": ["Ingresos", "Egresos"],
+                "Monto": [ingresos_calc, egresos_totales],
+                "Color": ["#2ecc71", "#dc3545"] # Verde para Ingreso, Rojo para Egreso
+            })
+            
+            chart_barras = alt.Chart(df_balance).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=60).encode(
+                x=alt.X("Categoría", sort=None, title="", axis=alt.Axis(labelAngle=0, labelFontSize=12)),
+                y=alt.Y("Monto", title="Monto en CLP"),
+                color=alt.Color("Color", scale=None),
+                tooltip=["Categoría", "Monto"]
+            ).properties(height=350)
+            
+            st.altair_chart(chart_barras, use_container_width=True)
+
+        with col_g2:
+            st.markdown("**Desglose de Fugas de Capital (Egresos)**")
+            df_egresos = pd.DataFrame({
+                "Tipo de Gasto": ["Nómina", "Gastos Fijos", "Costos Proyectos"],
+                "Monto": [costo_nomina_calc, fijos_calc, costos_proy_calc]
+            })
+            # Filtramos los que sean 0 para no saturar el grafico
+            df_egresos = df_egresos[df_egresos["Monto"] > 0]
+            
+            if not df_egresos.empty:
+                chart_donut = alt.Chart(df_egresos).mark_arc(innerRadius=60).encode(
+                    theta=alt.Theta(field="Monto", type="quantitative"),
+                    color=alt.Color(field="Tipo de Gasto", type="nominal", 
+                                    scale=alt.Scale(range=["#004d99", "#f39c12", "#e74c3c"]), 
+                                    legend=alt.Legend(orient="bottom", title="")),
+                    tooltip=["Tipo de Gasto", "Monto"]
+                ).properties(height=350)
+                
+                st.altair_chart(chart_donut, use_container_width=True)
+            else:
+                st.info("No hay egresos registrados para graficar.")
