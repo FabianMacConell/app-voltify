@@ -67,7 +67,7 @@ def guardar_datos(nombre_hoja, df):
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
         
-        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC']
+        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy']
         for col in columnas_str:
             if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
             
@@ -109,21 +109,41 @@ if 'presupuestos' not in st.session_state:
     st.session_state.presupuestos = cargar_datos("Presupuestos", df_presupuestos_base)
 
 if 'proyectos_resumen' not in st.session_state:
-    df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Ciudad", "Num_OC", "Cobro"])
+    df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Ciudad", "Num_OC", "Cobro", "Fecha_Inicio_Proy", "Fecha_Termino_Proy", "Duracion_Proy"])
     st.session_state.proyectos_resumen = cargar_datos("Proyectos_Resumen", df_resumen_base)
+
+# Forzador para columnas de fechas en proyectos
+cambio_proy = False
+if 'proyectos_resumen' in st.session_state:
+    for col in ['Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy']:
+        if col not in st.session_state.proyectos_resumen.columns:
+            st.session_state.proyectos_resumen[col] = "Pendiente"
+            cambio_proy = True
+    if cambio_proy: guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
 
 if 'proyectos_gastos' not in st.session_state:
     df_gastos_base = pd.DataFrame(columns=["Proyecto", "Detalle_Gasto", "Monto"])
     st.session_state.proyectos_gastos = cargar_datos("Proyectos_Gastos", df_gastos_base)
 
+# NUEVO: Base de datos para el Equipo del Proyecto
+if 'proyectos_equipo' not in st.session_state:
+    df_equipo_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Rol_Proyecto"])
+    st.session_state.proyectos_equipo = cargar_datos("Proyectos_Equipo", df_equipo_base)
+
 if 'proyectos_tareas' not in st.session_state:
-    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Horas_Estimadas", "Fecha_Inicio", "Fecha_Termino", "Estado"])
+    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
 
-# --- NUEVA BASE DE DATOS: SUBTAREAS ---
-if 'proyectos_subtareas' not in st.session_state:
-    df_subtareas_base = pd.DataFrame(columns=["Proyecto", "Tarea_Principal", "Subtarea", "Encargado", "Estado"])
-    st.session_state.proyectos_subtareas = cargar_datos("Proyectos_Subtareas", df_subtareas_base)
+# Limpieza de columnas obsoletas en tareas (Simplificación)
+cambio_tareas = False
+if 'proyectos_tareas' in st.session_state:
+    cols_to_drop = ['Horas_Estimadas', 'Fecha_Inicio', 'Fecha_Termino']
+    for c in cols_to_drop:
+        if c in st.session_state.proyectos_tareas.columns:
+            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas.drop(columns=[c])
+            cambio_tareas = True
+    if cambio_tareas: guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
@@ -259,8 +279,8 @@ if not st.session_state.acceso_app:
 # 5. NAVEGACIÓN SUPERIOR (BOTONERA INTELIGENTE)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
-col_logo, col_nav, col_settings = st.columns([2, 7, 1.5], vertical_alignment="center")
 
+col_logo, col_nav, col_settings = st.columns([2, 7, 1.5], vertical_alignment="center")
 with col_logo: st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
@@ -528,7 +548,7 @@ elif st.session_state.menu_actual == "Presupuestos":
 # PANTALLA 3: PROYECTOS
 # ==========================================
 elif st.session_state.menu_actual == "Proyectos":
-    st.markdown("### Gestión de Proyectos Operativos")
+    st.markdown("### Finanzas de Proyectos")
     
     if st.session_state.acceso_proyectos == "ninguno":
         with st.container(border=True):
@@ -556,7 +576,11 @@ elif st.session_state.menu_actual == "Proyectos":
                         if nombre_p and nombre_p not in st.session_state.proyectos_resumen["Proyecto"].values:
                             ciudad_final = ciudad_p if ciudad_p else "No especificada"
                             oc_final = oc_p if oc_p else "Pendiente"
-                            nuevo_resumen = pd.DataFrame([{"Proyecto": nombre_p, "Empresa": empresa_p, "Ciudad": ciudad_final, "Num_OC": oc_final, "Cobro": 0}])
+                            nuevo_resumen = pd.DataFrame([{
+                                "Proyecto": nombre_p, "Empresa": empresa_p, "Ciudad": ciudad_final, 
+                                "Num_OC": oc_final, "Cobro": 0, "Fecha_Inicio_Proy": "Pendiente", 
+                                "Fecha_Termino_Proy": "Pendiente", "Duracion_Proy": "Pendiente"
+                            }])
                             nuevo_gasto = pd.DataFrame([{"Proyecto": nombre_p, "Detalle_Gasto": "Materiales iniciales", "Monto": 0}])
                             st.session_state.proyectos_resumen = pd.concat([st.session_state.proyectos_resumen, nuevo_resumen], ignore_index=True)
                             st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto], ignore_index=True)
@@ -567,7 +591,7 @@ elif st.session_state.menu_actual == "Proyectos":
 
         proyectos_lista = st.session_state.proyectos_resumen["Proyecto"].tolist()
         if proyectos_lista:
-            proyecto_seleccionado = st.selectbox("📂 Selecciona un proyecto para abrir:", proyectos_lista)
+            proyecto_seleccionado = st.selectbox("📂 Selecciona un proyecto para gestionar sus finanzas:", proyectos_lista)
             idx_proy = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seleccionado].index[0]
             cobro_actual = st.session_state.proyectos_resumen.at[idx_proy, "Cobro"]
             oc_actual = st.session_state.proyectos_resumen.at[idx_proy, "Num_OC"]
@@ -602,7 +626,8 @@ elif st.session_state.menu_actual == "Proyectos":
 
             if st.session_state.acceso_proyectos == "admin":
                 with st.container(border=True):
-                    with st.expander("👥 Asignar Equipo de Trabajo al Gasto", expanded=False):
+                    with st.expander("💸 Cargar Gastos de Personal al Proyecto", expanded=False):
+                        st.write("Asigna parte del costo mensual de un trabajador a los gastos de esta obra.")
                         df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
                         trabajadores = ["Seleccione..."] + df_liq["Trabajador"].tolist()
                         colT1, colT2, colT3 = st.columns([2, 1, 1])
@@ -615,7 +640,7 @@ elif st.session_state.menu_actual == "Proyectos":
                             colT3.text_input("A imputar al proyecto:", key=llave_costo, on_change=formatear_input, kwargs={'llave': llave_costo})
                             monto_asig = float(st.session_state[llave_costo].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                             if st.button("Añadir al Gasto", type="secondary") and monto_asig > 0:
-                                nuevo_gasto_trab = pd.DataFrame([{"Proyecto": proyecto_seleccionado, "Detalle_Gasto": f"Mano de obra: {trabajador_sel}", "Monto": monto_asig}])
+                                nuevo_gasto_trab = pd.DataFrame([{"Proyecto": proyecto_seleccionado, "Detalle_Gasto": f"Costo HR: {trabajador_sel}", "Monto": monto_asig}])
                                 st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
                                 guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                                 st.session_state[llave_costo] = "0"
@@ -633,7 +658,7 @@ elif st.session_state.menu_actual == "Proyectos":
             if st.session_state.acceso_proyectos == "admin":
                 col_save, col_del = st.columns(2)
                 with col_save:
-                    if st.button("💾 Guardar Cambios de Proyecto", type="primary", use_container_width=True):
+                    if st.button("💾 Guardar Finanzas de Proyecto", type="primary", use_container_width=True):
                         st.session_state.proyectos_resumen.at[idx_proy, "Cobro"] = nuevo_cobro
                         st.session_state.proyectos_resumen.at[idx_proy, "Num_OC"] = nueva_oc 
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
@@ -643,168 +668,157 @@ elif st.session_state.menu_actual == "Proyectos":
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                         st.success("Guardado correctamente.")
                 with col_del:
-                    if st.button("🗑️ Eliminar Proyecto", use_container_width=True):
-                        # Efecto Dominó: Borra Proyecto, Gastos, Tareas y SUBTAREAS
+                    if st.button("🗑️ Eliminar Proyecto Completo", use_container_width=True):
+                        # Efecto Dominó masivo
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado]
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
+                        if 'proyectos_equipo' in st.session_state:
+                            st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] != proyecto_seleccionado]
+                            guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
                         if 'proyectos_tareas' in st.session_state:
                             st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] != proyecto_seleccionado]
                             guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                        if 'proyectos_subtareas' in st.session_state:
-                            st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[st.session_state.proyectos_subtareas["Proyecto"] != proyecto_seleccionado]
-                            guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
-                            
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                         st.rerun()
 
 # ==========================================
-# PANTALLA 4: SEGUIMIENTO OPERATIVO
+# PANTALLA 4: SEGUIMIENTO OPERATIVO (NUEVO FLUJO)
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
-    st.markdown("### Control y Seguimiento de Tareas")
+    st.markdown("### ⏱️ Gestión Operativa del Proyecto")
     
     proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
     
     if not proyectos_lista_seg:
         with st.container(border=True):
-            st.warning("No hay proyectos creados. Ve a 'Proyectos' para crear tu primera obra.")
+            st.warning("No hay proyectos creados. Ve a la pestaña 'Proyectos' para crear tu primera obra.")
     else:
-        proyecto_seg = st.selectbox("Selecciona un Proyecto:", proyectos_lista_seg)
-        df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
-        trabajadores_seg = ["Seleccione..."] + df_liq["Trabajador"].tolist()
+        proyecto_seg = st.selectbox("Selecciona un Proyecto a gestionar:", proyectos_lista_seg)
+        idx_p_seg = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seg].index[0]
         
+        # 1. CRONOGRAMA GENERAL
         with st.container(border=True):
-            with st.expander("➕ Crear Tarea Principal", expanded=False):
-                colS1, colS2 = st.columns(2)
-                trab_asignado = colS1.selectbox("Líder de la Tarea:", trabajadores_seg)
-                desc_tarea = colS2.text_input("Descripción de la Tarea Principal:", placeholder="Ej: Fase 1: Obra Gruesa")
+            st.markdown("#### 1️⃣ Cronograma General del Proyecto")
+            colF1, colF2, colF3 = st.columns(3)
+            
+            val_ini = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"]
+            val_fin = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"]
+            val_dur = st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"]
+            
+            nuevo_ini = colF1.text_input("Fecha de Inicio:", value="" if val_ini=="Pendiente" else val_ini, placeholder="Ej: 01/10/2026")
+            nuevo_fin = colF2.text_input("Fecha de Término:", value="" if val_fin=="Pendiente" else val_fin, placeholder="Ej: 15/12/2026")
+            nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 2.5 meses")
+            
+            if st.button("Guardar Fechas del Proyecto"):
+                st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"] = nuevo_ini if nuevo_ini else "Pendiente"
+                st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"] = nuevo_fin if nuevo_fin else "Pendiente"
+                st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"] = nueva_dur if nueva_dur else "Pendiente"
+                guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
+                st.success("Cronograma actualizado.")
                 
-                colS3, colS4, colS5 = st.columns(3)
-                h_estimadas = colS3.number_input("Horas Estimadas Totales:", min_value=1, step=1, value=8)
-                f_inicio = colS4.date_input("Fecha de Inicio:")
-                f_termino = colS5.date_input("Fecha de Término:")
-                
-                if st.button("Añadir Tarea Principal", type="primary"):
-                    if trab_asignado != "Seleccione..." and desc_tarea:
-                        nueva_tarea = pd.DataFrame([{
-                            "Proyecto": proyecto_seg, "Trabajador": trab_asignado, "Tarea": desc_tarea,
-                            "Horas_Estimadas": h_estimadas, "Fecha_Inicio": str(f_inicio),
-                            "Fecha_Termino": str(f_termino), "Estado": "En proceso"
-                        }])
-                        st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
-                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                        st.success("Tarea asignada y guardada con éxito.")
-                        st.rerun()
+        # 2. EQUIPO ASIGNADO
+        with st.container(border=True):
+            st.markdown("#### 2️⃣ Conformación del Equipo y Liderazgo")
+            st.write("Selecciona qué trabajadores de la nómina participarán en este proyecto y asígnales un rol.")
+            
+            df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
+            trabajadores_totales = ["Seleccione..."] + df_liq["Trabajador"].tolist()
+            
+            colE1, colE2, colE3 = st.columns([2, 2, 1], vertical_alignment="bottom")
+            nuevo_integrante = colE1.selectbox("Trabajador:", trabajadores_totales)
+            rol_asignado = colE2.selectbox("Rol en el Proyecto:", ["Líder de Proyecto", "Supervisor", "Técnico Especialista", "Operario", "Prevencionista"])
+            
+            if colE3.button("Añadir al Equipo", use_container_width=True):
+                if nuevo_integrante != "Seleccione...":
+                    # Evitar duplicados en el mismo proyecto
+                    mask_dup = (st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_equipo["Trabajador"] == nuevo_integrante)
+                    if not st.session_state.proyectos_equipo[mask_dup].empty:
+                        st.warning("Este trabajador ya está en el equipo del proyecto.")
                     else:
-                        st.error("Debes seleccionar un líder y escribir una descripción.")
-
-        with st.container(border=True):
-            st.subheader(f"Panel de Progreso Principal")
-            mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
-            df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
+                        nuevo_eq = pd.DataFrame([{"Proyecto": proyecto_seg, "Trabajador": nuevo_integrante, "Rol_Proyecto": rol_asignado}])
+                        st.session_state.proyectos_equipo = pd.concat([st.session_state.proyectos_equipo, nuevo_eq], ignore_index=True)
+                        guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
+                        st.success(f"{nuevo_integrante} añadido como {rol_asignado}.")
+                        st.rerun()
             
-            if df_tareas_filtradas.empty:
-                st.info("Aún no has asignado tareas principales para este proyecto.")
+            # Mostrar equipo actual
+            equipo_actual_df = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg]
+            if equipo_actual_df.empty:
+                st.info("Aún no has asignado a nadie al equipo de este proyecto.")
             else:
-                st.caption("Modifica el Estado, las Horas o las Fechas haciendo clic en las celdas:")
-                df_tareas_editadas = st.data_editor(
-                    df_tareas_filtradas,
-                    column_config={
-                        "Estado": st.column_config.SelectboxColumn("Estado de Tarea", options=["En proceso", "Terminada"]),
-                        "Horas_Estimadas": st.column_config.NumberColumn("Horas", min_value=1),
-                        "Fecha_Inicio": st.column_config.TextColumn("F. Inicio"),
-                        "Fecha_Termino": st.column_config.TextColumn("F. Término"),
-                    },
-                    disabled=["Proyecto", "Trabajador", "Tarea"],
-                    hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
-                )
+                st.write("**Equipo Actual Asignado:**")
+                # Mostrar en formato de etiquetas visuales
+                for idx, row in equipo_actual_df.iterrows():
+                    st.caption(f"👤 **{row['Trabajador']}** - 🏷️ *{row['Rol_Proyecto']}*")
                 
-                if st.button("💾 Guardar Progreso Principal", type="primary"):
-                    st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
-                    st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
-                    guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                    st.success("Estados actualizados.")
-                    
-                with st.expander("🗑️ Eliminar una Tarea Principal", expanded=False):
-                    lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
-                    if lista_nombres_tareas:
-                        tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
-                        if st.button("Eliminar Tarea Seleccionada"):
-                            # Eliminar tarea principal
-                            mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
-                            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
-                            # Efecto Dominó: Eliminar sus subtareas
-                            mask_elim_sub = (st.session_state.proyectos_subtareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_subtareas["Tarea_Principal"] == tarea_a_eliminar)
-                            st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[~mask_elim_sub]
-                            
-                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                            guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
-                            st.success("Tarea y subtareas eliminadas correctamente.")
-                            st.rerun()
+                with st.expander("Retirar a alguien del equipo"):
+                    quitar_integrante = st.selectbox("Selecciona para retirar:", equipo_actual_df["Trabajador"].tolist())
+                    if st.button("Retirar del Proyecto"):
+                        mask_quitar = (st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_equipo["Trabajador"] == quitar_integrante)
+                        st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[~mask_quitar]
+                        guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
+                        st.rerun()
 
-        # --- SECCIÓN DE SUBTAREAS ---
-        if not df_tareas_filtradas.empty:
-            st.divider()
-            st.markdown("#### 📋 Desglose de Subtareas")
-            lista_tareas_main = df_tareas_filtradas["Tarea"].tolist()
+        # 3. TAREAS ESPECÍFICAS Y PANEL DE CONTROL
+        with st.container(border=True):
+            st.markdown("#### 3️⃣ Asignación de Tareas Específicas")
             
-            tarea_seleccionada = st.selectbox("Selecciona una Tarea Principal para gestionar sus subtareas:", lista_tareas_main)
+            lista_equipo_nombres = equipo_actual_df["Trabajador"].tolist()
             
-            with st.container(border=True):
-                with st.expander(f"➕ Añadir nueva subtarea a: {tarea_seleccionada}", expanded=False):
-                    colSub1, colSub2 = st.columns([1, 2])
-                    sub_encargado = colSub1.selectbox("Asignar Subtarea a:", trabajadores_seg, key="sel_sub_enc")
-                    sub_desc = colSub2.text_input("Descripción de la Subtarea:", key="txt_sub_desc", placeholder="Ej: Compra de materiales")
+            if not lista_equipo_nombres:
+                st.warning("Primero debes añadir trabajadores al equipo (Paso 2) para poder asignarles tareas.")
+            else:
+                with st.expander("➕ Añadir Nueva Tarea", expanded=False):
+                    colT1, colT2 = st.columns([1, 2])
+                    # ¡MAGIA AQUÍ! Solo muestra a la gente del equipo
+                    encargado_tarea = colT1.selectbox("Asignar a:", lista_equipo_nombres)
+                    desc_tarea = colT2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalar tablero eléctrico principal")
                     
-                    if st.button("Añadir Subtarea", type="secondary"):
-                        if sub_encargado != "Seleccione..." and sub_desc:
-                            nueva_subtarea = pd.DataFrame([{
-                                "Proyecto": proyecto_seg, "Tarea_Principal": tarea_seleccionada,
-                                "Subtarea": sub_desc, "Encargado": sub_encargado, "Estado": "Pendiente"
+                    if st.button("Crear Tarea"):
+                        if desc_tarea:
+                            nueva_tarea = pd.DataFrame([{
+                                "Proyecto": proyecto_seg, "Trabajador": encargado_tarea, 
+                                "Tarea": desc_tarea, "Estado": "Pendiente"
                             }])
-                            st.session_state.proyectos_subtareas = pd.concat([st.session_state.proyectos_subtareas, nueva_subtarea], ignore_index=True)
-                            guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
-                            st.success("Subtarea añadida exitosamente.")
+                            st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
+                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                            st.success("Tarea asignada con éxito.")
                             st.rerun()
                         else:
-                            st.error("Selecciona un encargado y escribe la descripción.")
+                            st.error("Escribe una descripción para la tarea.")
+
+                st.markdown("#### 📊 Panel de Control y Progreso")
+                mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+                df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
                 
-                # Mostrar tabla de subtareas
-                mask_subtareas = (st.session_state.proyectos_subtareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_subtareas["Tarea_Principal"] == tarea_seleccionada)
-                df_sub_filtradas = st.session_state.proyectos_subtareas[mask_subtareas].copy()
-                
-                if df_sub_filtradas.empty:
-                    st.info("Aún no hay subtareas desglosadas para esta actividad.")
+                if df_tareas_filtradas.empty:
+                    st.info("No hay tareas registradas.")
                 else:
-                    st.caption("Cambia el estado de las subtareas:")
-                    df_sub_editadas = st.data_editor(
-                        df_sub_filtradas,
+                    df_tareas_editadas = st.data_editor(
+                        df_tareas_filtradas,
                         column_config={
-                            "Estado": st.column_config.SelectboxColumn("Estado Subtarea", options=["Pendiente", "En proceso", "Terminada"]),
+                            "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"]),
                         },
-                        disabled=["Proyecto", "Tarea_Principal", "Subtarea", "Encargado"],
-                        hide_index=True, use_container_width=True, key=f"ed_sub_{tarea_seleccionada}"
+                        disabled=["Proyecto", "Trabajador", "Tarea"],
+                        hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
                     )
                     
-                    if st.button("💾 Guardar Estados de Subtareas"):
-                        st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[~mask_subtareas]
-                        st.session_state.proyectos_subtareas = pd.concat([st.session_state.proyectos_subtareas, df_sub_editadas], ignore_index=True)
-                        guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
-                        st.success("Subtareas actualizadas.")
-                    
-                    with st.expander("🗑️ Eliminar una Subtarea Específica"):
-                        lista_sub_nombres = df_sub_filtradas["Subtarea"].tolist()
-                        if lista_sub_nombres:
-                            sub_a_eliminar = st.selectbox("Selecciona la subtarea a borrar:", lista_sub_nombres)
-                            if st.button("Eliminar Subtarea"):
-                                mask_elim_sub_esp = (st.session_state.proyectos_subtareas["Proyecto"] == proyecto_seg) & \
-                                                (st.session_state.proyectos_subtareas["Tarea_Principal"] == tarea_seleccionada) & \
-                                                (st.session_state.proyectos_subtareas["Subtarea"] == sub_a_eliminar)
-                                st.session_state.proyectos_subtareas = st.session_state.proyectos_subtareas[~mask_elim_sub_esp]
-                                guardar_datos("Proyectos_Subtareas", st.session_state.proyectos_subtareas)
-                                st.success("Subtarea eliminada.")
-                                st.rerun()
+                    if st.button("💾 Guardar Progreso de Tareas", type="primary"):
+                        st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
+                        st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
+                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                        st.success("Estados actualizados.")
+                        
+                    with st.expander("🗑️ Eliminar una Tarea"):
+                        lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
+                        tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
+                        if st.button("Eliminar Tarea Seleccionada"):
+                            mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
+                            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
+                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                            st.success("Tarea eliminada correctamente.")
+                            st.rerun()
 
 # ==========================================
 # PANTALLA 5: BALANCE TOTAL
