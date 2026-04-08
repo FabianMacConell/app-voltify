@@ -112,20 +112,10 @@ if 'proyectos_resumen' not in st.session_state:
     df_resumen_base = pd.DataFrame(columns=["Proyecto", "Empresa", "Ciudad", "Num_OC", "Cobro", "Fecha_Inicio_Proy", "Fecha_Termino_Proy", "Duracion_Proy"])
     st.session_state.proyectos_resumen = cargar_datos("Proyectos_Resumen", df_resumen_base)
 
-# Forzador para columnas de fechas en proyectos
-cambio_proy = False
-if 'proyectos_resumen' in st.session_state:
-    for col in ['Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy']:
-        if col not in st.session_state.proyectos_resumen.columns:
-            st.session_state.proyectos_resumen[col] = "Pendiente"
-            cambio_proy = True
-    if cambio_proy: guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
-
 if 'proyectos_gastos' not in st.session_state:
     df_gastos_base = pd.DataFrame(columns=["Proyecto", "Detalle_Gasto", "Monto"])
     st.session_state.proyectos_gastos = cargar_datos("Proyectos_Gastos", df_gastos_base)
 
-# NUEVO: Base de datos para el Equipo del Proyecto
 if 'proyectos_equipo' not in st.session_state:
     df_equipo_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Rol_Proyecto"])
     st.session_state.proyectos_equipo = cargar_datos("Proyectos_Equipo", df_equipo_base)
@@ -133,17 +123,6 @@ if 'proyectos_equipo' not in st.session_state:
 if 'proyectos_tareas' not in st.session_state:
     df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
-
-# Limpieza de columnas obsoletas en tareas (Simplificación)
-cambio_tareas = False
-if 'proyectos_tareas' in st.session_state:
-    cols_to_drop = ['Horas_Estimadas', 'Fecha_Inicio', 'Fecha_Termino']
-    for c in cols_to_drop:
-        if c in st.session_state.proyectos_tareas.columns:
-            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas.drop(columns=[c])
-            cambio_tareas = True
-    if cambio_tareas: guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
@@ -626,8 +605,8 @@ elif st.session_state.menu_actual == "Proyectos":
 
             if st.session_state.acceso_proyectos == "admin":
                 with st.container(border=True):
-                    with st.expander("💸 Cargar Gastos de Personal al Proyecto", expanded=False):
-                        st.write("Asigna parte del costo mensual de un trabajador a los gastos de esta obra.")
+                    with st.expander("💸 Asignar Personal y Cargar al Gasto (Vínculo a Operaciones)", expanded=False):
+                        st.info("💡 Al asignarle presupuesto a un trabajador aquí, lo autorizas automáticamente para ser parte del equipo en la pestaña de 'Operaciones'.")
                         df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
                         trabajadores = ["Seleccione..."] + df_liq["Trabajador"].tolist()
                         colT1, colT2, colT3 = st.columns([2, 1, 1])
@@ -640,7 +619,7 @@ elif st.session_state.menu_actual == "Proyectos":
                             colT3.text_input("A imputar al proyecto:", key=llave_costo, on_change=formatear_input, kwargs={'llave': llave_costo})
                             monto_asig = float(st.session_state[llave_costo].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                             if st.button("Añadir al Gasto", type="secondary") and monto_asig > 0:
-                                nuevo_gasto_trab = pd.DataFrame([{"Proyecto": proyecto_seleccionado, "Detalle_Gasto": f"Costo HR: {trabajador_sel}", "Monto": monto_asig}])
+                                nuevo_gasto_trab = pd.DataFrame([{"Proyecto": proyecto_seleccionado, "Detalle_Gasto": f"Mano de obra: {trabajador_sel}", "Monto": monto_asig}])
                                 st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
                                 guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                                 st.session_state[llave_costo] = "0"
@@ -669,7 +648,6 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.success("Guardado correctamente.")
                 with col_del:
                     if st.button("🗑️ Eliminar Proyecto Completo", use_container_width=True):
-                        # Efecto Dominó masivo
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado]
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         if 'proyectos_equipo' in st.session_state:
@@ -683,7 +661,7 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 4: SEGUIMIENTO OPERATIVO (NUEVO FLUJO)
+# PANTALLA 4: SEGUIMIENTO OPERATIVO (NUEVO FLUJO VINCULADO)
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
     st.markdown("### ⏱️ Gestión Operativa del Proyecto")
@@ -717,62 +695,73 @@ elif st.session_state.menu_actual == "Operaciones":
                 guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                 st.success("Cronograma actualizado.")
                 
-        # 2. EQUIPO ASIGNADO
+        # 2. EQUIPO ASIGNADO (VINCULACIÓN AUTOMÁTICA)
         with st.container(border=True):
             st.markdown("#### 2️⃣ Conformación del Equipo y Liderazgo")
-            st.write("Selecciona qué trabajadores de la nómina participarán en este proyecto y asígnales un rol.")
             
-            df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
-            trabajadores_totales = ["Seleccione..."] + df_liq["Trabajador"].tolist()
-            
-            colE1, colE2, colE3 = st.columns([2, 2, 1], vertical_alignment="bottom")
-            nuevo_integrante = colE1.selectbox("Trabajador:", trabajadores_totales)
-            rol_asignado = colE2.selectbox("Rol en el Proyecto:", ["Líder de Proyecto", "Supervisor", "Técnico Especialista", "Operario", "Prevencionista"])
-            
-            if colE3.button("Añadir al Equipo", use_container_width=True):
-                if nuevo_integrante != "Seleccione...":
-                    # Evitar duplicados en el mismo proyecto
-                    mask_dup = (st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_equipo["Trabajador"] == nuevo_integrante)
-                    if not st.session_state.proyectos_equipo[mask_dup].empty:
-                        st.warning("Este trabajador ya está en el equipo del proyecto.")
-                    else:
-                        nuevo_eq = pd.DataFrame([{"Proyecto": proyecto_seg, "Trabajador": nuevo_integrante, "Rol_Proyecto": rol_asignado}])
-                        st.session_state.proyectos_equipo = pd.concat([st.session_state.proyectos_equipo, nuevo_eq], ignore_index=True)
-                        guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
-                        st.success(f"{nuevo_integrante} añadido como {rol_asignado}.")
-                        st.rerun()
-            
-            # Mostrar equipo actual
-            equipo_actual_df = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg]
-            if equipo_actual_df.empty:
-                st.info("Aún no has asignado a nadie al equipo de este proyecto.")
+            # Buscar automáticamente a quienes se les asignó dinero en "Proyectos"
+            gastos_proy_seg = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == proyecto_seg]
+            trabajadores_financiados = []
+            for detalle in gastos_proy_seg["Detalle_Gasto"]:
+                if str(detalle).startswith("Mano de obra: "):
+                    nombre = str(detalle).replace("Mano de obra: ", "").strip()
+                    if nombre not in trabajadores_financiados:
+                        trabajadores_financiados.append(nombre)
+                        
+            if not trabajadores_financiados:
+                st.warning("⚠️ No has asignado presupuesto de personal a este proyecto. Ve a la pestaña **Proyectos**, abre esta obra y usa **'Asignar Personal y Cargar al Gasto'** para que aparezcan aquí.")
             else:
-                st.write("**Equipo Actual Asignado:**")
-                # Mostrar en formato de etiquetas visuales
-                for idx, row in equipo_actual_df.iterrows():
-                    st.caption(f"👤 **{row['Trabajador']}** - 🏷️ *{row['Rol_Proyecto']}*")
+                # Sincronización Inteligente: Agregar los nuevos a proyectos_equipo y quitar los que ya no están financiados
+                equipo_actual = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg]
+                trabajadores_en_equipo = equipo_actual["Trabajador"].tolist()
                 
-                with st.expander("Retirar a alguien del equipo"):
-                    quitar_integrante = st.selectbox("Selecciona para retirar:", equipo_actual_df["Trabajador"].tolist())
-                    if st.button("Retirar del Proyecto"):
-                        mask_quitar = (st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_equipo["Trabajador"] == quitar_integrante)
-                        st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[~mask_quitar]
-                        guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
-                        st.rerun()
+                cambios_sync = False
+                for trab in trabajadores_financiados:
+                    if trab not in trabajadores_en_equipo:
+                        nuevo_eq = pd.DataFrame([{"Proyecto": proyecto_seg, "Trabajador": trab, "Rol_Proyecto": "Por definir"}])
+                        st.session_state.proyectos_equipo = pd.concat([st.session_state.proyectos_equipo, nuevo_eq], ignore_index=True)
+                        cambios_sync = True
+                        
+                mask_validos = st.session_state.proyectos_equipo["Trabajador"].isin(trabajadores_financiados) | (st.session_state.proyectos_equipo["Proyecto"] != proyecto_seg)
+                if not mask_validos.all():
+                    st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[mask_validos]
+                    cambios_sync = True
+                    
+                if cambios_sync:
+                    guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
+                
+                st.write("Estos trabajadores fueron financiados para el proyecto. Asígnales su rol operativo correspondiente:")
+                
+                # Cargar datos frescos para editar
+                mask_eq = st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg
+                df_eq_editar = st.session_state.proyectos_equipo[mask_eq]
+                
+                df_eq_mod = st.data_editor(
+                    df_eq_editar,
+                    column_config={
+                        "Rol_Proyecto": st.column_config.SelectboxColumn("Rol Operativo", options=["Por definir", "Líder de Proyecto", "Supervisor", "Técnico Especialista", "Operario", "Prevencionista"], required=True)
+                    },
+                    disabled=["Proyecto", "Trabajador"], hide_index=True, use_container_width=True, key=f"ed_eq_{proyecto_seg}"
+                )
+                
+                if st.button("💾 Guardar Roles del Equipo", type="primary"):
+                    st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[~mask_eq]
+                    st.session_state.proyectos_equipo = pd.concat([st.session_state.proyectos_equipo, df_eq_mod], ignore_index=True)
+                    guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
+                    st.success("Roles del equipo actualizados.")
 
         # 3. TAREAS ESPECÍFICAS Y PANEL DE CONTROL
         with st.container(border=True):
             st.markdown("#### 3️⃣ Asignación de Tareas Específicas")
             
-            lista_equipo_nombres = equipo_actual_df["Trabajador"].tolist()
-            
-            if not lista_equipo_nombres:
-                st.warning("Primero debes añadir trabajadores al equipo (Paso 2) para poder asignarles tareas.")
+            # Solo podemos asignar tareas si hay gente financiada
+            if not trabajadores_financiados:
+                st.info("El equipo debe estar conformado para asignar tareas.")
             else:
                 with st.expander("➕ Añadir Nueva Tarea", expanded=False):
                     colT1, colT2 = st.columns([1, 2])
-                    # ¡MAGIA AQUÍ! Solo muestra a la gente del equipo
-                    encargado_tarea = colT1.selectbox("Asignar a:", lista_equipo_nombres)
+                    # Desplegable 100% enlazado al equipo real
+                    encargado_tarea = colT1.selectbox("Asignar a:", trabajadores_financiados)
                     desc_tarea = colT2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalar tablero eléctrico principal")
                     
                     if st.button("Crear Tarea"):
@@ -793,7 +782,7 @@ elif st.session_state.menu_actual == "Operaciones":
                 df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
                 
                 if df_tareas_filtradas.empty:
-                    st.info("No hay tareas registradas.")
+                    st.info("No hay tareas registradas para este equipo.")
                 else:
                     df_tareas_editadas = st.data_editor(
                         df_tareas_filtradas,
