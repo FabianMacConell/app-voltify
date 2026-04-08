@@ -10,23 +10,23 @@ import datetime
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
-# CSS Limpio: Solo ocultamos marcas de agua y damos aire superior
+# CSS Minimalista: Solo ocultamos marcas de agua y damos aire al logo
 ocultar_menu_estilo = """
             <style>
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
             
-            /* Dar más espacio (aire) en la parte superior para que nada se corte */
+            /* Aire superior para que nada quede pegado al borde del navegador */
             .block-container {
                 padding-top: 2rem !important;
                 padding-bottom: 2rem !important;
             }
             
-            /* Centrar verticalmente los elementos de la barra superior */
-            [data-testid="column"] {
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
+            /* Forzar que el logo nunca se corte y mantenga su proporción */
+            [data-testid="column"] img {
+                max-height: 45px !important;
+                width: auto !important;
+                display: block;
             }
             </style>
             """
@@ -211,22 +211,41 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (NUEVO DISEÑO DESPLEGABLE)
+# 5. NAVEGACIÓN SUPERIOR (BOTONERA INTELIGENTE)
 # ==========================================
-# Proporciones más equilibradas: [2] para logo, [4] para menú, [2] para ajustes
-col_logo, col_nav, col_settings = st.columns([2, 4, 2], vertical_alignment="center")
+# Iniciamos el estado del menú si no existe
+if 'menu_actual' not in st.session_state:
+    st.session_state.menu_actual = "Finanzas"
+
+# Distribuimos el espacio: 20% Logo, 70% Botones, 10% Ajustes
+col_logo, col_nav, col_settings = st.columns([2, 7, 1.5], vertical_alignment="center")
 
 with col_logo:
-    # use_container_width permite que crezca naturalmente sin recortarse
     st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
-    # El selectbox ("flecha retraíble") reemplaza al radio button. Es más limpio.
-    opciones_menu = ["💼 Finanzas", "📝 Presupuestos", "🏗️ Proyectos", "⏱️ Operaciones", "📊 Balance"]
-    menu_seleccionado = st.selectbox("Módulo Activo", opciones_menu, label_visibility="collapsed")
+    # Subdividimos el espacio del medio en 5 columnas iguales para los botones
+    b1, b2, b3, b4, b5 = st.columns(5)
+    
+    # Cada botón se pinta de "primary" (azul) si está seleccionado, o "secondary" (gris) si no.
+    if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True):
+        st.session_state.menu_actual = "Finanzas"
+        st.rerun()
+    if b2.button("📝 Presupuestos", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True):
+        st.session_state.menu_actual = "Presupuestos"
+        st.rerun()
+    if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True):
+        st.session_state.menu_actual = "Proyectos"
+        st.rerun()
+    if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True):
+        st.session_state.menu_actual = "Operaciones"
+        st.rerun()
+    if b5.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True):
+        st.session_state.menu_actual = "Balance"
+        st.rerun()
 
 with col_settings:
-    with st.popover("⚙️ Ajustes de Sistema", use_container_width=True):
+    with st.popover("⚙️ Ajustes", use_container_width=True):
         st.markdown("**Opciones Globales**")
         if st.button("🔄 Sincronizar", use_container_width=True):
             for key in list(st.session_state.keys()):
@@ -248,7 +267,7 @@ st.divider()
 # ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
-if menu_seleccionado == "💼 Finanzas":
+if st.session_state.menu_actual == "Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
     
     if st.session_state.acceso_finanzas == "ninguno":
@@ -381,7 +400,7 @@ if menu_seleccionado == "💼 Finanzas":
 # ==========================================
 # PANTALLA 2: PRESUPUESTOS Y COTIZACIONES
 # ==========================================
-elif menu_seleccionado == "📝 Presupuestos":
+elif st.session_state.menu_actual == "Presupuestos":
     st.markdown("### Gestión de Presupuestos y Cotizaciones")
     
     with st.container(border=True):
@@ -476,7 +495,7 @@ elif menu_seleccionado == "📝 Presupuestos":
 # ==========================================
 # PANTALLA 3: PROYECTOS
 # ==========================================
-elif menu_seleccionado == "🏗️ Proyectos":
+elif st.session_state.menu_actual == "Proyectos":
     st.markdown("### Gestión de Proyectos Operativos")
     
     if st.session_state.acceso_proyectos == "ninguno":
@@ -615,7 +634,7 @@ elif menu_seleccionado == "🏗️ Proyectos":
 # ==========================================
 # PANTALLA 4: SEGUIMIENTO OPERATIVO
 # ==========================================
-elif menu_seleccionado == "⏱️ Operaciones":
+elif st.session_state.menu_actual == "Operaciones":
     st.markdown("### Control y Seguimiento de Tareas")
     
     proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
@@ -696,7 +715,7 @@ elif menu_seleccionado == "⏱️ Operaciones":
 # ==========================================
 # PANTALLA 5: BALANCE TOTAL
 # ==========================================
-elif menu_seleccionado == "📊 Balance":
+elif st.session_state.menu_actual == "Balance":
     st.markdown("### Balance General de la Empresa")
     
     if st.session_state.acceso_finanzas == "ninguno":
