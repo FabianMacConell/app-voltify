@@ -68,7 +68,7 @@ def guardar_datos(nombre_hoja, df):
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
         
-        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy']
+        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
         for col in columnas_str:
             if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
             
@@ -128,6 +128,11 @@ if 'proyectos_tareas' not in st.session_state:
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
     st.session_state.gastos_fijos = cargar_datos("Gastos_Fijos", df_fijos_base)
+
+# NUEVA BASE DE DATOS: INVENTARIO
+if 'inventario' not in st.session_state:
+    df_inventario_base = pd.DataFrame(columns=["Artículo", "Cantidad", "Nro_Serie", "Estado"])
+    st.session_state.inventario = cargar_datos("Inventario", df_inventario_base)
 
 def formato_clp(valor):
     try: return f"${int(valor):,.0f}".replace(",", ".")
@@ -260,16 +265,18 @@ if not st.session_state.acceso_app:
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-col_logo, col_nav, col_settings = st.columns([2, 7, 1.5], vertical_alignment="center")
+# Ajuste de columnas para que quepan 6 botones de menú
+col_logo, col_nav, col_settings = st.columns([1.5, 7.5, 1.5], vertical_alignment="center")
 with col_logo: st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
-    b1, b2, b3, b4, b5 = st.columns(5)
+    b1, b2, b3, b4, b5, b6 = st.columns(6)
     if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
-    if b2.button("📝 Presupuestos", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
+    if b2.button("📝 Presup.", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
     if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
     if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True): st.session_state.menu_actual = "Operaciones"; st.rerun()
-    if b5.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True): st.session_state.menu_actual = "Balance"; st.rerun()
+    if b5.button("📦 Inventario", type="primary" if st.session_state.menu_actual == "Inventario" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inventario"; st.rerun()
+    if b6.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True): st.session_state.menu_actual = "Balance"; st.rerun()
 
 with col_settings:
     with st.popover("⚙️ Ajustes", use_container_width=True):
@@ -801,7 +808,86 @@ elif st.session_state.menu_actual == "Operaciones":
                                 st.rerun()
 
 # ==========================================
-# PANTALLA 5: BALANCE TOTAL (CON GRÁFICOS INTERACTIVOS)
+# PANTALLA NUEVA: INVENTARIO
+# ==========================================
+elif st.session_state.menu_actual == "Inventario":
+    st.markdown("### 📦 Control de Inventario y Activos")
+    
+    with st.container(border=True):
+        st.markdown("#### 🔍 Buscador Rápido")
+        busqueda = st.text_input("Ingresa el Número de Serie o Nombre del Artículo para localizarlo rápidamente:", placeholder="Ej: SN-12345 o Taladro")
+        
+        if busqueda:
+            mask = st.session_state.inventario["Nro_Serie"].astype(str).str.contains(busqueda, case=False, na=False) | \
+                   st.session_state.inventario["Artículo"].astype(str).str.contains(busqueda, case=False, na=False)
+            resultados = st.session_state.inventario[mask]
+            
+            if resultados.empty:
+                st.warning("No se encontraron artículos con ese dato en la base de datos.")
+            else:
+                st.success(f"Se encontraron {len(resultados)} coincidencias:")
+                st.dataframe(resultados, use_container_width=True)
+
+    with st.container(border=True):
+        with st.expander("➕ Añadir Nuevo Artículo al Inventario", expanded=False):
+            colI1, colI2, colI3 = st.columns([2, 1, 2])
+            nuevo_art = colI1.text_input("Nombre del Artículo / Herramienta:")
+            nueva_cant = colI2.number_input("Cantidad:", min_value=1, step=1)
+            nuevo_serie = colI3.text_input("N° de Serie / Código Único:")
+            
+            if st.button("Guardar en Inventario", type="primary"):
+                if nuevo_art and nuevo_serie:
+                    # Chequeo de duplicados por serie
+                    if nuevo_serie in st.session_state.inventario["Nro_Serie"].values:
+                        st.error("⚠️ Este Número de Serie ya existe en el inventario.")
+                    else:
+                        nuevo_item = pd.DataFrame([{
+                            "Artículo": nuevo_art, "Cantidad": nueva_cant, 
+                            "Nro_Serie": nuevo_serie, "Estado": "Disponible"
+                        }])
+                        st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
+                        guardar_datos("Inventario", st.session_state.inventario)
+                        st.success("Artículo añadido con éxito.")
+                        st.rerun()
+                else:
+                    st.error("Por favor completa el nombre del artículo y su número de serie.")
+
+    with st.container(border=True):
+        st.markdown("#### 📋 Base de Datos de Inventario General")
+        
+        if st.session_state.inventario.empty:
+            st.info("El inventario está actualmente vacío.")
+        else:
+            st.caption("Puedes modificar la Cantidad o el Estado directamente haciendo clic en la tabla:")
+            df_inv_edit = st.data_editor(
+                st.session_state.inventario,
+                column_config={
+                    "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0),
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Disponible", "En Uso", "En Reparación", "Extraviado"]),
+                    "Nro_Serie": st.column_config.TextColumn("N° de Serie (Inmutable)")
+                },
+                disabled=["Artículo", "Nro_Serie"], # Protegemos el nombre y serie para que no se borren por error
+                hide_index=True, use_container_width=True, key="ed_inv"
+            )
+            
+            if st.button("💾 Guardar Cambios de Inventario", type="primary"):
+                st.session_state.inventario = df_inv_edit
+                guardar_datos("Inventario", st.session_state.inventario)
+                st.success("Inventario actualizado correctamente.")
+            
+            with st.expander("🗑️ Dar de Baja / Eliminar Artículo"):
+                lista_articulos = [f"{row['Artículo']} (SN: {row['Nro_Serie']})" for i, row in st.session_state.inventario.iterrows()]
+                if lista_articulos:
+                    art_a_borrar = st.selectbox("Selecciona el artículo a eliminar:", lista_articulos)
+                    if st.button("Eliminar Definitivamente"):
+                        idx_borrar = lista_articulos.index(art_a_borrar)
+                        st.session_state.inventario = st.session_state.inventario.drop(st.session_state.inventario.index[idx_borrar]).reset_index(drop=True)
+                        guardar_datos("Inventario", st.session_state.inventario)
+                        st.success("Artículo dado de baja.")
+                        st.rerun()
+
+# ==========================================
+# PANTALLA 6: BALANCE TOTAL (CON GRÁFICOS)
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
     st.markdown("### 📊 Balance General y Estadísticas")
@@ -852,17 +938,12 @@ elif st.session_state.menu_actual == "Balance":
             elif rentabilidad < 0: st.error(f"📉 Alerta: Los gastos superan a los ingresos en {formato_clp(abs(rentabilidad))}.")
             else: st.info("⚖️ Análisis: La empresa se encuentra en su punto de equilibrio.")
             
-        # ==========================================
-        # SECCIÓN GRÁFICA INTERACTIVA
-        # ==========================================
         st.markdown("#### 📈 Dashboard de Rendimiento Financiero")
-        
-        # --- NUEVO: SELECTOR DE GRÁFICO (EVITA SATURACIÓN VISUAL) ---
         vista_grafico = st.selectbox("Seleccionar Gráfico a visualizar:", 
                                      ["📊 Comparativa de Flujo de Caja (Ingresos vs Egresos)", 
                                       "🍩 Desglose de Fugas de Capital (Distribución de Egresos)"])
         
-        st.write("") # Espacio en blanco
+        st.write("") 
         
         if vista_grafico == "📊 Comparativa de Flujo de Caja (Ingresos vs Egresos)":
             df_balance = pd.DataFrame({
@@ -870,14 +951,12 @@ elif st.session_state.menu_actual == "Balance":
                 "Monto": [ingresos_calc, egresos_totales],
                 "Color": ["#2ecc71", "#dc3545"] 
             })
-            
             chart_barras = alt.Chart(df_balance).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=80).encode(
                 x=alt.X("Categoría", sort=None, title="", axis=alt.Axis(labelAngle=0, labelFontSize=14)),
                 y=alt.Y("Monto", title="Monto en CLP"),
                 color=alt.Color("Color", scale=None),
                 tooltip=["Categoría", "Monto"]
             ).properties(height=400)
-            
             st.altair_chart(chart_barras, use_container_width=True)
 
         elif vista_grafico == "🍩 Desglose de Fugas de Capital (Distribución de Egresos)":
@@ -895,7 +974,6 @@ elif st.session_state.menu_actual == "Balance":
                                     legend=alt.Legend(orient="bottom", title="", labelFontSize=13)),
                     tooltip=["Tipo de Gasto", "Monto"]
                 ).properties(height=400)
-                
                 st.altair_chart(chart_donut, use_container_width=True)
             else:
                 st.info("No hay egresos registrados para graficar.")
