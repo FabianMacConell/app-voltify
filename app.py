@@ -7,6 +7,7 @@ import datetime
 import os
 import tempfile
 import altair as alt
+import uuid
 
 # Intentar importar FPDF de forma segura
 try:
@@ -129,7 +130,6 @@ if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
     st.session_state.gastos_fijos = cargar_datos("Gastos_Fijos", df_fijos_base)
 
-# NUEVA BASE DE DATOS: INVENTARIO
 if 'inventario' not in st.session_state:
     df_inventario_base = pd.DataFrame(columns=["Artículo", "Cantidad", "Nro_Serie", "Estado"])
     st.session_state.inventario = cargar_datos("Inventario", df_inventario_base)
@@ -265,7 +265,6 @@ if not st.session_state.acceso_app:
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-# Ajuste de columnas para que quepan 6 botones de menú
 col_logo, col_nav, col_settings = st.columns([1.5, 7.5, 1.5], vertical_alignment="center")
 with col_logo: st.image(LOGO_URL, use_container_width=True)
 
@@ -815,7 +814,7 @@ elif st.session_state.menu_actual == "Inventario":
     
     with st.container(border=True):
         st.markdown("#### 🔍 Buscador Rápido")
-        busqueda = st.text_input("Ingresa el Número de Serie o Nombre del Artículo para localizarlo rápidamente:", placeholder="Ej: SN-12345 o Taladro")
+        busqueda = st.text_input("Ingresa el Número de Serie o Nombre del Artículo para localizarlo rápidamente:", placeholder="Ej: VLT- o Taladro")
         
         if busqueda:
             mask = st.session_state.inventario["Nro_Serie"].astype(str).str.contains(busqueda, case=False, na=False) | \
@@ -830,27 +829,25 @@ elif st.session_state.menu_actual == "Inventario":
 
     with st.container(border=True):
         with st.expander("➕ Añadir Nuevo Artículo al Inventario", expanded=False):
-            colI1, colI2, colI3 = st.columns([2, 1, 2])
+            colI1, colI2 = st.columns([3, 1])
             nuevo_art = colI1.text_input("Nombre del Artículo / Herramienta:")
             nueva_cant = colI2.number_input("Cantidad:", min_value=1, step=1)
-            nuevo_serie = colI3.text_input("N° de Serie / Código Único:")
             
             if st.button("Guardar en Inventario", type="primary"):
-                if nuevo_art and nuevo_serie:
-                    # Chequeo de duplicados por serie
-                    if nuevo_serie in st.session_state.inventario["Nro_Serie"].values:
-                        st.error("⚠️ Este Número de Serie ya existe en el inventario.")
-                    else:
-                        nuevo_item = pd.DataFrame([{
-                            "Artículo": nuevo_art, "Cantidad": nueva_cant, 
-                            "Nro_Serie": nuevo_serie, "Estado": "Disponible"
-                        }])
-                        st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
-                        guardar_datos("Inventario", st.session_state.inventario)
-                        st.success("Artículo añadido con éxito.")
-                        st.rerun()
+                if nuevo_art:
+                    # Generador Automático de Serie (VLT- + 6 caracteres únicos)
+                    nuevo_serie = f"VLT-{uuid.uuid4().hex[:6].upper()}"
+                    
+                    nuevo_item = pd.DataFrame([{
+                        "Artículo": nuevo_art, "Cantidad": nueva_cant, 
+                        "Nro_Serie": nuevo_serie, "Estado": "Disponible"
+                    }])
+                    st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
+                    guardar_datos("Inventario", st.session_state.inventario)
+                    st.success(f"✅ Artículo añadido con éxito. **N° de Serie asignado automáticamente: {nuevo_serie}**")
+                    st.rerun()
                 else:
-                    st.error("Por favor completa el nombre del artículo y su número de serie.")
+                    st.error("Por favor completa el nombre del artículo.")
 
     with st.container(border=True):
         st.markdown("#### 📋 Base de Datos de Inventario General")
@@ -864,9 +861,9 @@ elif st.session_state.menu_actual == "Inventario":
                 column_config={
                     "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0),
                     "Estado": st.column_config.SelectboxColumn("Estado", options=["Disponible", "En Uso", "En Reparación", "Extraviado"]),
-                    "Nro_Serie": st.column_config.TextColumn("N° de Serie (Inmutable)")
+                    "Nro_Serie": st.column_config.TextColumn("N° de Serie (Automático)")
                 },
-                disabled=["Artículo", "Nro_Serie"], # Protegemos el nombre y serie para que no se borren por error
+                disabled=["Artículo", "Nro_Serie"], # Protegemos el nombre y serie para que no se alteren
                 hide_index=True, use_container_width=True, key="ed_inv"
             )
             
