@@ -134,6 +134,9 @@ if 'inventario' not in st.session_state:
     df_inventario_base = pd.DataFrame(columns=["Artículo", "Cantidad", "Nro_Serie", "Estado"])
     st.session_state.inventario = cargar_datos("Inventario", df_inventario_base)
 
+if 'ultima_etiqueta' not in st.session_state:
+    st.session_state.ultima_etiqueta = None
+
 def formato_clp(valor):
     try: return f"${int(valor):,.0f}".replace(",", ".")
     except (ValueError, TypeError): return "$0"
@@ -228,6 +231,28 @@ def generar_pdf_liquidacion(datos):
     pdf.cell(95, 10, "__________________________", align='C', ln=True)
     pdf.cell(95, 5, "Firma Empleador", align='C')
     pdf.cell(95, 5, "Firma Trabajador", align='C', ln=True)
+    temp_path = tempfile.mktemp(suffix=".pdf")
+    pdf.output(temp_path)
+    with open(temp_path, "rb") as f: pdf_bytes = f.read()
+    os.remove(temp_path)
+    return pdf_bytes
+
+def generar_etiqueta_pdf(nombre, serie):
+    # Formato personalizado pequeño para etiquetas: 80mm de ancho x 25mm de alto
+    pdf = FPDF(format=(80, 25))
+    pdf.add_page()
+    # Limpiamos caracteres extraños por si acaso
+    nombre_limpio = str(nombre)[:35].encode('latin-1', 'replace').decode('latin-1') 
+    
+    pdf.set_font("Arial", 'B', 8)
+    pdf.cell(0, 4, "VOLTIFY SpA - CONTROL DE ACTIVOS", ln=True, align='C')
+    
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(0, 6, nombre_limpio, ln=True, align='C')
+    
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 6, f"S/N: {serie}", ln=True, align='C')
+    
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
     with open(temp_path, "rb") as f: pdf_bytes = f.read()
@@ -812,6 +837,32 @@ elif st.session_state.menu_actual == "Operaciones":
 elif st.session_state.menu_actual == "Inventario":
     st.markdown("### 📦 Control de Inventario y Activos")
     
+    # ---------------------------------------------------------
+    # NOTIFICADOR Y GENERADOR DE ETIQUETA EN LA PARTE SUPERIOR
+    # ---------------------------------------------------------
+    if st.session_state.ultima_etiqueta:
+        with st.container(border=True):
+            st.success(f"✅ ¡Artículo guardado exitosamente!")
+            
+            if FPDF_DISPONIBLE:
+                pdf_etiqueta = generar_etiqueta_pdf(st.session_state.ultima_etiqueta['nombre'], st.session_state.ultima_etiqueta['serie'])
+                col_btn1, col_btn2 = st.columns([1, 1])
+                
+                col_btn1.download_button(
+                    label=f"🖨️ Imprimir Etiqueta ({st.session_state.ultima_etiqueta['serie']})",
+                    data=pdf_etiqueta,
+                    file_name=f"Etiqueta_Voltify_{st.session_state.ultima_etiqueta['serie']}.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                    use_container_width=True
+                )
+                
+                if col_btn2.button("Cerrar Aviso", use_container_width=True):
+                    st.session_state.ultima_etiqueta = None
+                    st.rerun()
+            else:
+                st.error("⚠️ La librería FPDF no está instalada para generar la etiqueta.")
+    
     with st.container(border=True):
         st.markdown("#### 🔍 Buscador Rápido")
         busqueda = st.text_input("Ingresa el Número de Serie o Nombre del Artículo para localizarlo rápidamente:", placeholder="Ej: VLT- o Taladro")
@@ -844,7 +895,9 @@ elif st.session_state.menu_actual == "Inventario":
                     }])
                     st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
                     guardar_datos("Inventario", st.session_state.inventario)
-                    st.success(f"✅ Artículo añadido con éxito. **N° de Serie asignado automáticamente: {nuevo_serie}**")
+                    
+                    # Guardamos la info en sesión para mostrar el botón de descarga arriba
+                    st.session_state.ultima_etiqueta = {"nombre": nuevo_art, "serie": nuevo_serie}
                     st.rerun()
                 else:
                     st.error("Por favor completa el nombre del artículo.")
