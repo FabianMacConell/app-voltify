@@ -280,7 +280,7 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (BOTONERA 100% SIN ESFERAS)
+# 5. NAVEGACIÓN SUPERIOR (BOTONERA INTELIGENTE)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
@@ -288,10 +288,9 @@ col_logo, col_nav, col_settings = st.columns([1.5, 7.5, 1.5], vertical_alignment
 with col_logo: st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
-    # Usamos botones de Streamlit, no hay radios, por ende NO HAY CIRCUNFERENCIAS.
     b1, b2, b3, b4, b5, b6 = st.columns(6)
     if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
-    if b2.button("📝 Presupuestos", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
+    if b2.button("📝 Presup.", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
     if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
     if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True): st.session_state.menu_actual = "Operaciones"; st.rerun()
     if b5.button("📦 Inventario", type="primary" if st.session_state.menu_actual == "Inventario" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inventario"; st.rerun()
@@ -300,7 +299,7 @@ with col_nav:
 with col_settings:
     with st.popover("⚙️ Ajustes", use_container_width=True):
         st.markdown("**Opciones Globales**")
-        if st.button("🔄 Sincronizar Base", use_container_width=True):
+        if st.button("🔄 Sincronizar", use_container_width=True):
             for key in list(st.session_state.keys()):
                 if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']: del st.session_state[key]
             st.rerun()
@@ -308,7 +307,7 @@ with col_settings:
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
             st.rerun()
-        if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        if st.button("🚪 Salir", use_container_width=True):
             st.session_state.acceso_app = False
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
@@ -940,30 +939,20 @@ elif st.session_state.menu_actual == "Balance":
         current_year = datetime.datetime.now().year
         meses = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
         
-        # Cálculos mensuales fijos
         df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
         fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
         
         datos_grafico = []
-        
-        # Procesar los 12 meses para el Gráfico Anual
         for mes in meses:
-            # 1. Costos fijos en todos los meses
             datos_grafico.append({"Mes": mes, "Categoría": "Gastos Fijos y Nómina", "Monto": (costo_nomina_mensual + fijos_mensuales)})
-            
             ingresos_mes = 0
             costos_proy_mes = 0
             
-            # 2. Distribuir proyectos en sus meses de término
             if not st.session_state.proyectos_resumen.empty:
                 for idx, row in st.session_state.proyectos_resumen.iterrows():
                     fecha_term = str(row.get("Fecha_Termino_Proy", ""))
-                    
-                    # Si el proyecto coincide con el mes actual del loop
                     if fecha_term.startswith(mes) or (fecha_term in ["Pendiente", ""] and mes == f"{current_year}-{str(datetime.datetime.now().month).zfill(2)}"):
                         ingresos_mes += float(row.get("Cobro", 0))
-                        
-                        # Buscar gastos asociados a este proyecto
                         if not st.session_state.proyectos_gastos.empty:
                             gastos_asoc = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == row["Proyecto"]]["Monto"].sum()
                             costos_proy_mes += float(gastos_asoc)
@@ -973,7 +962,19 @@ elif st.session_state.menu_actual == "Balance":
             
         df_anual = pd.DataFrame(datos_grafico)
         
-        # Calcular totales reales globales
+        def formato_tooltip_millones(row):
+            val_m = row["Monto"] / 1000000
+            if val_m.is_integer():
+                val_str = f"{int(val_m)}"
+            else:
+                val_str = f"{val_m:.1f}"
+            if row["Categoría"] == "Ingresos por Ventas/Proyectos":
+                return f"+{val_str}M CLP"
+            else:
+                return f"-{val_str}M CLP"
+                
+        df_anual["Detalle_Tooltip"] = df_anual.apply(formato_tooltip_millones, axis=1)
+        
         ingresos_totales = df_anual[df_anual["Categoría"] == "Ingresos por Ventas/Proyectos"]["Monto"].sum()
         egresos_totales = df_anual[df_anual["Categoría"] != "Ingresos por Ventas/Proyectos"]["Monto"].sum()
         rentabilidad = ingresos_totales - egresos_totales
@@ -990,15 +991,22 @@ elif st.session_state.menu_actual == "Balance":
         
         with st.container(border=True):
             st.markdown("#### 📈 Estado de Resultado Anual (Mensualizado)")
-            st.caption("Análisis de flujo de caja mes a mes. Barras azules representan ingresos, rojas/naranjas representan salidas de capital.")
+            st.caption("Análisis de flujo de caja mes a mes. Las barras muestran el balance de ingresos y salidas de capital.")
             
-            # Usar st.bar_chart nativo para emular la imagen enviada por el usuario
-            df_pivot = df_anual.pivot(index="Mes", columns="Categoría", values="Monto")
-            # Ordenamos las columnas para que Ingresos aparezca primero (azul)
-            columnas_ordenadas = ["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"]
-            # Filtrar columnas que existan en el pivot
-            columnas_ordenadas = [col for col in columnas_ordenadas if col in df_pivot.columns]
-            df_pivot = df_pivot[columnas_ordenadas]
+            # Gráfico de Barras Agrupadas con Altair (Igual a tu imagen de referencia)
+            grafico_anual = alt.Chart(df_anual).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+                x=alt.X("Mes:O", title="Meses del Año", sort=meses, axis=alt.Axis(labelAngle=-45)),
+                xOffset=alt.XOffset("Categoría:N", sort=["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"]),
+                y=alt.Y("Monto:Q", title="Monto en CLP (Millones)", scale=alt.Scale(domainMin=0), axis=alt.Axis(labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
+                color=alt.Color("Categoría:N", 
+                                scale=alt.Scale(domain=["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"], 
+                                                range=["#3182bd", "#fd8d3c", "#d62728"]),
+                                legend=alt.Legend(title="", orient="right")),
+                tooltip=[
+                    alt.Tooltip("Mes:O", title="Período"),
+                    alt.Tooltip("Categoría:N", title="Concepto"),
+                    alt.Tooltip("Detalle_Tooltip:N", title="Impacto en Caja")
+                ]
+            ).properties(height=450)
             
-            # Gráfico Nativo de Streamlit (Se agrupa automáticamente mes a mes)
-            st.bar_chart(df_pivot, color=["#3182bd", "#d62728", "#fd8d3c"])
+            st.altair_chart(grafico_anual, use_container_width=True)
