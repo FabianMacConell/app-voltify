@@ -21,27 +21,14 @@ except ImportError:
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
-# CSS: Restauramos la protección de la botonera y el ancho máximo
 ocultar_menu_estilo = """
             <style>
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
-            
-            /* Expandir al 100% y dar márgenes */
             .block-container {
                 padding-top: 1.5rem !important;
                 padding-bottom: 2rem !important;
-                padding-left: 2rem !important;
-                padding-right: 2rem !important;
-                max-width: 100% !important;
             }
-            
-            /* Bloqueo anti-quiebre para que los botones nunca se corten ni salten de línea */
-            div[data-testid="stButton"] button {
-                white-space: nowrap !important;
-                padding: 0.5rem 0.2rem !important;
-            }
-            
             [data-testid="column"] img {
                 max-height: 45px !important;
                 width: auto !important;
@@ -292,14 +279,12 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (PROPORCIONES CORREGIDAS)
+# 5. NAVEGACIÓN SUPERIOR (BOTONERA 100% SIN ESFERAS)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-col_logo, col_nav, col_settings = st.columns([1.5, 8.5, 1.5], vertical_alignment="center")
-
-with col_logo:
-    st.image(LOGO_URL, use_container_width=True)
+col_logo, col_nav, col_settings = st.columns([1.5, 7.5, 1.5], vertical_alignment="center")
+with col_logo: st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
     b1, b2, b3, b4, b5, b6 = st.columns(6)
@@ -435,7 +420,7 @@ if st.session_state.menu_actual == "Finanzas":
                             mime="application/pdf", type="primary", use_container_width=True
                         )
                 else:
-                    st.error("⚠️ La librería para crear PDFs no está instalada.")
+                    st.error("⚠️ La librería para crear PDFs no está instalada. Ejecuta 'pip install fpdf' o añádelo a tu requirements.txt")
 
         with tab_fijos:
             with st.container(border=True):
@@ -477,6 +462,7 @@ if st.session_state.menu_actual == "Finanzas":
 # ==========================================
 elif st.session_state.menu_actual == "Presupuestos":
     st.markdown("### Gestión de Presupuestos y Cotizaciones")
+    
     with st.container(border=True):
         with st.expander("➕ Crear Nueva Cotización / Presupuesto", expanded=False):
             tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True)
@@ -500,7 +486,7 @@ elif st.session_state.menu_actual == "Presupuestos":
             colP3.text_input("Monto Total Cotizado (CLP):", key="input_monto_presupuesto", on_change=formatear_input, kwargs={'llave': 'input_monto_presupuesto'})
             monto_pres = float(st.session_state['input_monto_presupuesto'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
             
-            # --- Calendario con formato Chileno DD-MM-YYYY ---
+            # --- Calendario con formato DD-MM-YYYY en Presupuestos ---
             fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD-MM-YYYY")
             
             colP5, colP6, colP7 = st.columns(3)
@@ -529,6 +515,7 @@ elif st.session_state.menu_actual == "Presupuestos":
         if st.session_state.presupuestos.empty:
             st.info("Aún no hay cotizaciones emitidas en el sistema.")
         else:
+            st.caption("Actualiza el estado, la aprobación o el número de OC directamente en la tabla:")
             opciones_estado = ["Presupuestada", "Adjudicada", "En progreso", "Entregada", "Pagada"]
             opciones_aprobacion = ["Pendiente", "Aprobada", "No Aprobada"]
             opciones_orden = ["Sin Orden", "Con Orden"]
@@ -543,7 +530,8 @@ elif st.session_state.menu_actual == "Presupuestos":
                     "Estado_Comercial": st.column_config.SelectboxColumn("Estado Comercial", options=opciones_estado),
                     "Fecha_Emision": st.column_config.TextColumn("Fecha Emisión")
                 },
-                disabled=["Tipo", "Referencia", "Cliente"], hide_index=True, use_container_width=True, key="ed_pres"
+                disabled=["Tipo", "Referencia", "Cliente"],
+                hide_index=True, use_container_width=True, key="ed_pres"
             )
             
             if st.button("💾 Guardar Estados Comerciales", type="primary"):
@@ -567,6 +555,7 @@ elif st.session_state.menu_actual == "Presupuestos":
 # ==========================================
 elif st.session_state.menu_actual == "Proyectos":
     st.markdown("### Finanzas de Proyectos")
+    
     if st.session_state.acceso_proyectos == "ninguno":
         with st.container(border=True):
             st.info("🔒 Ingresa credenciales de administrador para desbloquear este módulo.")
@@ -698,9 +687,14 @@ elif st.session_state.menu_actual == "Proyectos":
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                         st.rerun()
 
+# ==========================================
+# PANTALLA 4: SEGUIMIENTO OPERATIVO
+# ==========================================
 elif st.session_state.menu_actual == "Operaciones":
     st.markdown("### ⏱️ Gestión Operativa del Proyecto")
+    
     proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
+    
     if not proyectos_lista_seg:
         with st.container(border=True):
             st.warning("No hay proyectos creados. Ve a la pestaña 'Proyectos' para crear tu primera obra.")
@@ -711,10 +705,12 @@ elif st.session_state.menu_actual == "Operaciones":
         with st.container(border=True):
             st.markdown("#### 1️⃣ Cronograma General del Proyecto")
             colF1, colF2, colF3 = st.columns(3)
+            
             val_ini = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"]
             val_fin = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"]
             val_dur = st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"]
             
+            # Función para leer las fechas desde la base de datos sin importar si están vacías o en texto antiguo
             def parse_fecha(f_str):
                 try:
                     if pd.isna(f_str) or str(f_str).strip() in ["", "Pendiente"]: 
@@ -723,13 +719,14 @@ elif st.session_state.menu_actual == "Operaciones":
                 except:
                     return None
             
-            # --- Calendarios Interactivos con formato Chileno DD-MM-YYYY ---
+            # --- NUEVO: Calendario Interactivo con formato Chileno DD-MM-YYYY ---
             nuevo_ini = colF1.date_input("Fecha de Inicio:", value=parse_fecha(val_ini), format="DD-MM-YYYY")
             nuevo_fin = colF2.date_input("Fecha de Término:", value=parse_fecha(val_fin), format="DD-MM-YYYY")
             
             nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 3 meses")
+            
             if st.button("Guardar Fechas del Proyecto"):
-                # Conversión interna a YYYY-MM-DD para la base de datos y gráficos
+                # Convertimos la fecha del calendario a YYYY-MM-DD internamente para que el gráfico no se rompa
                 str_ini = nuevo_ini.strftime('%Y-%m-%d') if nuevo_ini else "Pendiente"
                 str_fin = nuevo_fin.strftime('%Y-%m-%d') if nuevo_fin else "Pendiente"
                 
@@ -746,32 +743,42 @@ elif st.session_state.menu_actual == "Operaciones":
             for detalle in gastos_proy_seg["Detalle_Gasto"]:
                 if str(detalle).startswith("Mano de obra: "):
                     nombre = str(detalle).replace("Mano de obra: ", "").strip()
-                    if nombre not in trabajadores_financiados: trabajadores_financiados.append(nombre)
+                    if nombre not in trabajadores_financiados:
+                        trabajadores_financiados.append(nombre)
                         
             if not trabajadores_financiados:
-                st.warning("⚠️ No has asignado presupuesto de personal a este proyecto.")
+                st.warning("⚠️ No has asignado presupuesto de personal a este proyecto. Ve a la pestaña **Proyectos**, abre esta obra y usa **'Asignar Personal y Cargar al Gasto'** para habilitar al equipo operativamente.")
             else:
                 equipo_actual = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg]
                 trabajadores_en_equipo = equipo_actual["Trabajador"].tolist()
+                
                 cambios_sync = False
                 for trab in trabajadores_financiados:
                     if trab not in trabajadores_en_equipo:
                         nuevo_eq = pd.DataFrame([{"Proyecto": proyecto_seg, "Trabajador": trab, "Rol_Proyecto": "Por definir"}])
                         st.session_state.proyectos_equipo = pd.concat([st.session_state.proyectos_equipo, nuevo_eq], ignore_index=True)
                         cambios_sync = True
+                        
                 mask_validos = st.session_state.proyectos_equipo["Trabajador"].isin(trabajadores_financiados) | (st.session_state.proyectos_equipo["Proyecto"] != proyecto_seg)
                 if not mask_validos.all():
                     st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[mask_validos]
                     cambios_sync = True
-                if cambios_sync: guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
+                    
+                if cambios_sync:
+                    guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
                 
+                st.write("Estos trabajadores fueron financiados para el proyecto. Asígnales su rol operativo correspondiente:")
                 mask_eq = st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg
                 df_eq_editar = st.session_state.proyectos_equipo[mask_eq]
+                
                 df_eq_mod = st.data_editor(
                     df_eq_editar,
-                    column_config={"Rol_Proyecto": st.column_config.SelectboxColumn("Rol Operativo", options=["Por definir", "Líder de Proyecto", "Supervisor", "Técnico Especialista", "Operario", "Prevencionista"], required=True)},
+                    column_config={
+                        "Rol_Proyecto": st.column_config.SelectboxColumn("Rol Operativo", options=["Por definir", "Líder de Proyecto", "Supervisor", "Técnico Especialista", "Operario", "Prevencionista"], required=True)
+                    },
                     disabled=["Proyecto", "Trabajador"], hide_index=True, use_container_width=True, key=f"ed_eq_{proyecto_seg}"
                 )
+                
                 if st.button("💾 Guardar Roles del Equipo", type="primary"):
                     st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[~mask_eq]
                     st.session_state.proyectos_equipo = pd.concat([st.session_state.proyectos_equipo, df_eq_mod], ignore_index=True)
@@ -787,30 +794,42 @@ elif st.session_state.menu_actual == "Operaciones":
                     colT1, colT2 = st.columns([1, 2])
                     encargado_tarea = colT1.selectbox("Asignar a:", trabajadores_financiados)
                     desc_tarea = colT2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalar tablero eléctrico principal")
+                    
                     if st.button("Crear Tarea"):
                         if desc_tarea:
-                            nueva_tarea = pd.DataFrame([{"Proyecto": proyecto_seg, "Trabajador": encargado_tarea, "Tarea": desc_tarea, "Estado": "Pendiente"}])
+                            nueva_tarea = pd.DataFrame([{
+                                "Proyecto": proyecto_seg, "Trabajador": encargado_tarea, 
+                                "Tarea": desc_tarea, "Estado": "Pendiente"
+                            }])
                             st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
                             guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                            st.success("Tarea asignada.")
+                            st.success("Tarea asignada con éxito.")
                             st.rerun()
-                        else: st.error("Escribe una descripción para la tarea.")
+                        else:
+                            st.error("Escribe una descripción para la tarea.")
 
+                st.markdown("#### 📊 Panel de Control y Progreso")
                 mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
                 df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
+                
                 if df_tareas_filtradas.empty:
                     st.info("No hay tareas registradas para este equipo.")
                 else:
                     df_tareas_editadas = st.data_editor(
                         df_tareas_filtradas,
-                        column_config={"Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"])},
-                        disabled=["Proyecto", "Trabajador", "Tarea"], hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
+                        column_config={
+                            "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"]),
+                        },
+                        disabled=["Proyecto", "Trabajador", "Tarea"],
+                        hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
                     )
+                    
                     if st.button("💾 Guardar Progreso de Tareas", type="primary"):
                         st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
                         st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
                         guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
                         st.success("Estados actualizados.")
+                        
                     with st.expander("🗑️ Eliminar una Tarea"):
                         lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
                         if lista_nombres_tareas:
@@ -819,18 +838,26 @@ elif st.session_state.menu_actual == "Operaciones":
                                 mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
                                 st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
                                 guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                                st.success("Tarea eliminada.")
+                                st.success("Tarea eliminada correctamente.")
                                 st.rerun()
 
+# ==========================================
+# PANTALLA 5: INVENTARIO
+# ==========================================
 elif st.session_state.menu_actual == "Inventario":
     st.markdown("### 📦 Control de Inventario y Activos")
+    
     with st.container(border=True):
         st.markdown("#### 🔍 Buscador Rápido")
         busqueda = st.text_input("Ingresa el Número de Serie o Nombre del Artículo para localizarlo rápidamente:", placeholder="Ej: VLT- o Taladro")
+        
         if busqueda:
-            mask = st.session_state.inventario["Nro_Serie"].astype(str).str.contains(busqueda, case=False, na=False) | st.session_state.inventario["Artículo"].astype(str).str.contains(busqueda, case=False, na=False)
+            mask = st.session_state.inventario["Nro_Serie"].astype(str).str.contains(busqueda, case=False, na=False) | \
+                   st.session_state.inventario["Artículo"].astype(str).str.contains(busqueda, case=False, na=False)
             resultados = st.session_state.inventario[mask]
-            if resultados.empty: st.warning("No se encontraron artículos con ese dato en la base de datos.")
+            
+            if resultados.empty:
+                st.warning("No se encontraron artículos con ese dato en la base de datos.")
             else:
                 st.success(f"Se encontraron {len(resultados)} coincidencias:")
                 st.dataframe(resultados, use_container_width=True)
@@ -840,38 +867,52 @@ elif st.session_state.menu_actual == "Inventario":
             colI1, colI2 = st.columns([3, 1])
             nuevo_art = colI1.text_input("Nombre del Artículo / Herramienta:")
             nueva_cant = colI2.number_input("Cantidad:", min_value=1, step=1)
+            
             if st.button("Guardar en Inventario", type="primary"):
                 if nuevo_art:
                     nuevo_serie = f"VLT-{uuid.uuid4().hex[:6].upper()}"
-                    nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": nueva_cant, "Nro_Serie": nuevo_serie, "Estado": "Disponible"}])
+                    nuevo_item = pd.DataFrame([{
+                        "Artículo": nuevo_art, "Cantidad": nueva_cant, 
+                        "Nro_Serie": nuevo_serie, "Estado": "Disponible"
+                    }])
                     st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
                     guardar_datos("Inventario", st.session_state.inventario)
-                    st.success(f"✅ Artículo añadido con éxito. **N° de Serie: {nuevo_serie}**")
+                    st.success(f"✅ Artículo añadido con éxito. **N° de Serie asignado automáticamente: {nuevo_serie}**")
                     st.rerun()
-                else: st.error("Por favor completa el nombre del artículo.")
+                else:
+                    st.error("Por favor completa el nombre del artículo.")
                     
     with st.container(border=True):
         st.markdown("#### 🖨️ Generador de Etiquetas de Código")
-        if st.session_state.inventario.empty: st.info("Agrega artículos al inventario para imprimir sus etiquetas.")
+        if st.session_state.inventario.empty:
+            st.info("Agrega artículos al inventario para imprimir sus etiquetas.")
         else:
             lista_etiquetas = [f"{row['Artículo']} (SN: {row['Nro_Serie']})" for i, row in st.session_state.inventario.iterrows()]
             item_seleccionado = st.selectbox("Selecciona el artículo para imprimir su etiqueta:", lista_etiquetas)
+            
             if item_seleccionado:
                 idx_str = lista_etiquetas.index(item_seleccionado)
                 serie_a_imprimir = st.session_state.inventario.at[idx_str, 'Nro_Serie']
+                
                 if FPDF_DISPONIBLE:
                     pdf_etiqueta = generar_etiqueta_pdf(serie_a_imprimir)
                     st.download_button(
                         label=f"⬇️ Descargar Etiqueta ({serie_a_imprimir})",
-                        data=pdf_etiqueta, file_name=f"Etiqueta_{serie_a_imprimir}.pdf",
-                        mime="application/pdf", type="primary"
+                        data=pdf_etiqueta,
+                        file_name=f"Etiqueta_{serie_a_imprimir}.pdf",
+                        mime="application/pdf",
+                        type="primary"
                     )
-                else: st.error("⚠️ La librería FPDF no está instalada.")
+                else:
+                    st.error("⚠️ La librería FPDF no está instalada.")
 
     with st.container(border=True):
         st.markdown("#### 📋 Base de Datos de Inventario General")
-        if st.session_state.inventario.empty: st.info("El inventario está actualmente vacío.")
+        
+        if st.session_state.inventario.empty:
+            st.info("El inventario está actualmente vacío.")
         else:
+            st.caption("Puedes modificar la Cantidad o el Estado directamente haciendo clic en la tabla:")
             df_inv_edit = st.data_editor(
                 st.session_state.inventario,
                 column_config={
@@ -879,12 +920,15 @@ elif st.session_state.menu_actual == "Inventario":
                     "Estado": st.column_config.SelectboxColumn("Estado", options=["Disponible", "En Uso", "En Reparación", "Extraviado"]),
                     "Nro_Serie": st.column_config.TextColumn("N° de Serie (Automático)")
                 },
-                disabled=["Artículo", "Nro_Serie"], hide_index=True, use_container_width=True, key="ed_inv"
+                disabled=["Artículo", "Nro_Serie"], 
+                hide_index=True, use_container_width=True, key="ed_inv"
             )
+            
             if st.button("💾 Guardar Cambios de Inventario", type="primary"):
                 st.session_state.inventario = df_inv_edit
                 guardar_datos("Inventario", st.session_state.inventario)
                 st.success("Inventario actualizado correctamente.")
+            
             with st.expander("🗑️ Dar de Baja / Eliminar Artículo"):
                 lista_articulos = [f"{row['Artículo']} (SN: {row['Nro_Serie']})" for i, row in st.session_state.inventario.iterrows()]
                 if lista_articulos:
@@ -897,73 +941,79 @@ elif st.session_state.menu_actual == "Inventario":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 6: BALANCE TOTAL (MEJORADO CON SELECTOR INTERNO)
+# PANTALLA 6: BALANCE TOTAL Y GRÁFICOS
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
+    st.markdown("### 📊 Balance General y Estadísticas")
     
-    # 1. Definir bases de fechas y extracción de datos globales
-    current_year = datetime.datetime.now().year
-    meses_año_actual = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
-    meses_set = set(meses_año_actual)
-    
-    if not st.session_state.proyectos_resumen.empty:
-        for val in st.session_state.proyectos_resumen["Fecha_Termino_Proy"]:
-            val_str = str(val)
-            if val_str != "Pendiente" and len(val_str) >= 7:
-                meses_set.add(val_str[:7])
-                
-    meses_totales = sorted(list(meses_set))
-    
-    df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
-    fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
-    
-    datos_grafico = []
-    for mes in meses_totales:
-        ingresos_mes = 0
-        costos_proy_mes = 0
+    if st.session_state.acceso_finanzas == "ninguno":
+        with st.container(border=True):
+            st.warning("🔒 Esta sección consolida información confidencial de Voltify.")
+            st.info("Por favor, ve a la pestaña 'Finanzas' e inicia sesión para desbloquear el Balance Total.")
+    else:
+        # Selector de Vista
+        col_filtro, col_vacia = st.columns([1, 3])
+        vista_balance = col_filtro.selectbox("📅 Temporalidad del Balance:", ["Proyección Anual (12 Meses)", "Vista Mensual Específica", "Histórico Completo"])
         
-        if not st.session_state.proyectos_resumen.empty:
-            for idx, row in st.session_state.proyectos_resumen.iterrows():
-                fecha_term = str(row.get("Fecha_Termino_Proy", ""))
-                if fecha_term.startswith(mes) or (fecha_term in ["Pendiente", ""] and mes == f"{current_year}-{str(datetime.datetime.now().month).zfill(2)}"):
-                    ingresos_mes += float(row.get("Cobro", 0))
-                    if not st.session_state.proyectos_gastos.empty:
-                        gastos_asoc = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == row["Proyecto"]]["Monto"].sum()
-                        costos_proy_mes += float(gastos_asoc)
+        current_year = datetime.datetime.now().year
         
-        egresos_totales_mes = costo_nomina_mensual + fijos_mensuales + costos_proy_mes
-        datos_grafico.append({"Mes": mes, "Tipo": "Ingresos (+)", "Monto": ingresos_mes})
-        datos_grafico.append({"Mes": mes, "Tipo": "Egresos (-)", "Monto": egresos_totales_mes})
-        
-    df_full = pd.DataFrame(datos_grafico)
-
-    # 2. Renderizado del recuadro principal
-    with st.container(border=True):
-        st.markdown("#### 💡 Balance Financiero Acumulado")
-        
-        col_f1, col_f2 = st.columns(2)
-        vista_balance = col_f1.selectbox("📅 Temporalidad del Balance:", ["Proyección Anual (12 Meses)", "Vista Mensual Específica", "Histórico Completo"])
-        
-        # Filtros basados en la selección
+        # Lógica de agrupación de meses según la vista seleccionada
         if vista_balance == "Proyección Anual (12 Meses)":
+            meses_año_actual = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
+            meses_totales = meses_año_actual
             meses_filtrados = meses_año_actual
             titulo_metricas = "Proyección Anual (Año en Curso)"
             desc_metricas = "Rendimiento y proyección de los 12 meses del año actual."
-        elif vista_balance == "Vista Mensual Específica":
-            mes_actual_str = f"{current_year}-{str(datetime.datetime.now().month).zfill(2)}"
-            idx_mes = meses_totales.index(mes_actual_str) if mes_actual_str in meses_totales else 0
-            mes_seleccionado = col_f2.selectbox("Seleccionar Mes:", meses_totales, index=idx_mes)
-            meses_filtrados = [mes_seleccionado]
-            titulo_metricas = f"Balance del Mes: {mes_seleccionado}"
-            desc_metricas = "Análisis aislado de ingresos y egresos para el mes seleccionado."
-        else: # Histórico
-            meses_filtrados = meses_totales
-            titulo_metricas = "Balance Histórico Acumulado"
-            desc_metricas = "Suma global de todos los meses y proyectos registrados."
+        else:
+            meses_set = set()
+            if not st.session_state.proyectos_resumen.empty:
+                for val in st.session_state.proyectos_resumen["Fecha_Termino_Proy"]:
+                    val_str = str(val)
+                    if val_str != "Pendiente" and len(val_str) >= 7:
+                        meses_set.add(val_str[:7])
             
+            for i in range(1, 13):
+                meses_set.add(f"{current_year}-{str(i).zfill(2)}")
+                
+            meses_totales = sorted(list(meses_set))
+            
+            if vista_balance == "Vista Mensual Específica":
+                mes_actual_str = f"{current_year}-{str(datetime.datetime.now().month).zfill(2)}"
+                idx_mes = meses_totales.index(mes_actual_str) if mes_actual_str in meses_totales else 0
+                mes_seleccionado = col_vacia.selectbox("Seleccionar Mes:", meses_totales, index=idx_mes)
+                meses_filtrados = [mes_seleccionado]
+                titulo_metricas = f"Balance del Mes: {mes_seleccionado}"
+                desc_metricas = "Análisis aislado de ingresos y egresos para el mes seleccionado."
+            else: # Histórico Completo
+                meses_filtrados = meses_totales
+                titulo_metricas = "Balance Histórico Acumulado"
+                desc_metricas = "Suma global de todos los meses y proyectos registrados."
+
+        df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
+        fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
+        
+        datos_grafico = []
+        for mes in meses_totales:
+            ingresos_mes = 0
+            costos_proy_mes = 0
+            
+            if not st.session_state.proyectos_resumen.empty:
+                for idx, row in st.session_state.proyectos_resumen.iterrows():
+                    fecha_term = str(row.get("Fecha_Termino_Proy", ""))
+                    if fecha_term.startswith(mes) or (fecha_term in ["Pendiente", ""] and mes == f"{current_year}-{str(datetime.datetime.now().month).zfill(2)}"):
+                        ingresos_mes += float(row.get("Cobro", 0))
+                        if not st.session_state.proyectos_gastos.empty:
+                            gastos_asoc = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == row["Proyecto"]]["Monto"].sum()
+                            costos_proy_mes += float(gastos_asoc)
+            
+            egresos_totales_mes = costo_nomina_mensual + fijos_mensuales + costos_proy_mes
+            datos_grafico.append({"Mes": mes, "Tipo": "Ingresos (+)", "Monto": ingresos_mes})
+            datos_grafico.append({"Mes": mes, "Tipo": "Egresos (-)", "Monto": egresos_totales_mes})
+            
+        df_full = pd.DataFrame(datos_grafico)
         df_filtrado = df_full[df_full["Mes"].isin(meses_filtrados)].copy()
         
-        # Formato de Tooltips en CLP Millones
+        # Tooltip inteligente en formato Millones
         def formato_tooltip_millones(row):
             val_m = row["Monto"] / 1000000
             val_str = f"{int(val_m)}" if val_m.is_integer() else f"{val_m:.1f}"
@@ -971,52 +1021,51 @@ elif st.session_state.menu_actual == "Balance":
             
         df_filtrado["Detalle_Tooltip"] = df_filtrado.apply(formato_tooltip_millones, axis=1)
         
-        # Cálculo de métricas filtradas
         ingresos_totales = df_filtrado[df_filtrado["Tipo"] == "Ingresos (+)"]["Monto"].sum()
         egresos_totales = df_filtrado[df_filtrado["Tipo"] == "Egresos (-)"]["Monto"].sum()
         rentabilidad = ingresos_totales - egresos_totales
         
-        st.divider()
-        st.markdown(f"**{titulo_metricas}**")
-        st.caption(desc_metricas)
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ingresos Acumulados", formato_clp(ingresos_totales))
-        c2.metric("Egresos Acumulados", formato_clp(egresos_totales))
-        c3.metric("Rentabilidad Neta", formato_clp(rentabilidad))
-        
-    st.write("") 
-    
-    with st.container(border=True):
-        st.markdown("#### 📈 Estado de Resultado Mensualizado")
-        st.caption("Las barras muestran el balance de ingresos y salidas de capital.")
-        
-        if vista_balance == "Histórico Completo":
-            x_scale = alt.Scale() 
-            x_sort = meses_totales
-        else:
-            x_scale = alt.Scale(domain=meses_año_actual) 
-            x_sort = meses_año_actual
+        with st.container(border=True):
+            st.markdown(f"#### 💡 {titulo_metricas}")
+            st.caption(desc_metricas)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Ingresos Acumulados Proyectados", formato_clp(ingresos_totales))
+            c2.metric("Egresos Acumulados Proyectados", formato_clp(egresos_totales))
+            c3.metric("Rentabilidad Neta", formato_clp(rentabilidad))
             
-        grafico_balance = alt.Chart(df_filtrado).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
-            x=alt.X("Mes:O", title="Períodos", sort=x_sort, scale=x_scale, axis=alt.Axis(labelAngle=-45)),
-            xOffset=alt.XOffset("Tipo:N", sort=["Ingresos (+)", "Egresos (-)"]),
-            
-            # Eje Y estricto en 0, 50 y 100 Millones
-            y=alt.Y("Monto:Q", 
-                    title="", 
-                    scale=alt.Scale(domain=[0, 100000000]), 
-                    axis=alt.Axis(values=[0, 50000000, 100000000], labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
-            
-            color=alt.Color("Tipo:N", 
-                            scale=alt.Scale(domain=["Ingresos (+)", "Egresos (-)"], 
-                                            range=["#3b82f6", "#e53e3e"]),
-                            legend=alt.Legend(title="", orient="right")),
-            tooltip=[
-                alt.Tooltip("Mes:O", title="Período"),
-                alt.Tooltip("Tipo:N", title="Concepto"),
-                alt.Tooltip("Detalle_Tooltip:N", title="Impacto en Caja")
-            ]
-        ).properties(height=450)
+        st.write("") 
         
-        st.altair_chart(grafico_balance, use_container_width=True)
+        with st.container(border=True):
+            st.markdown("#### 📈 Estado de Resultado Mensualizado")
+            st.caption("Análisis de flujo de caja. Las barras muestran el balance de ingresos y salidas de capital por mes.")
+            
+            if vista_balance == "Histórico Completo":
+                x_scale = alt.Scale() 
+                x_sort = meses_totales
+            else:
+                meses_año_actual = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
+                x_scale = alt.Scale(domain=meses_año_actual) 
+                x_sort = meses_año_actual
+                
+            grafico_balance = alt.Chart(df_filtrado).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
+                x=alt.X("Mes:O", title="Períodos", sort=x_sort, scale=x_scale, axis=alt.Axis(labelAngle=-45)),
+                xOffset=alt.XOffset("Tipo:N", sort=["Ingresos (+)", "Egresos (-)"]),
+                
+                # Eje Y estricto en 0, 50 y 100 Millones
+                y=alt.Y("Monto:Q", 
+                        title="", 
+                        scale=alt.Scale(domain=[0, 100000000]), 
+                        axis=alt.Axis(values=[0, 50000000, 100000000], labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
+                
+                color=alt.Color("Tipo:N", 
+                                scale=alt.Scale(domain=["Ingresos (+)", "Egresos (-)"], 
+                                                range=["#3b82f6", "#e53e3e"]),
+                                legend=alt.Legend(title="", orient="right")),
+                tooltip=[
+                    alt.Tooltip("Mes:O", title="Período"),
+                    alt.Tooltip("Tipo:N", title="Concepto"),
+                    alt.Tooltip("Detalle_Tooltip:N", title="Impacto en Caja")
+                ]
+            ).properties(height=450)
+            
+            st.altair_chart(grafico_balance, use_container_width=True)
