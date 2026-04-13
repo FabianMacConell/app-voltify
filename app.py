@@ -280,11 +280,12 @@ if not st.session_state.acceso_app:
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
 # --- NIVEL 1: CABECERA CORPORATIVA (Logo a la izquierda, Ajustes a la derecha) ---
-col_logo, col_espacio, col_settings = st.columns([3, 7, 2], vertical_alignment="center")
+# Cambiamos vertical_alignment a "bottom" para alinear las bases
+col_logo, col_espacio, col_settings = st.columns([3, 7, 2], vertical_alignment="bottom")
 
 with col_logo:
-    # Al tener una columna más ancha (3), el logo ya no se comprimirá.
-    # Puedes ajustar el width si lo quieres más grande o más pequeño.
+    # Inyectamos 15 píxeles de espacio invisible para "bajar" el logo
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
     st.image(LOGO_URL, width=200)
 
 with col_settings:
@@ -304,7 +305,7 @@ with col_settings:
             st.session_state.acceso_proyectos = "ninguno"
             st.rerun()
 
-st.write("") # Pequeño salto de línea para dar respiro
+st.write("") # Pequeño salto de línea para dar respiro antes de la botonera
 
 # --- NIVEL 2: BOTONERA DE MÓDULOS (Ocupa todo el ancho) ---
 b1, b2, b3, b4, b5, b6 = st.columns(6)
