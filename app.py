@@ -940,10 +940,35 @@ elif st.session_state.menu_actual == "Balance":
             st.warning("🔒 Esta sección consolida información confidencial de Voltify.")
             st.info("Por favor, ve a la pestaña 'Finanzas' e inicia sesión para desbloquear el Balance Total.")
     else:
-        # Generar datos del año en curso
-        current_year = datetime.datetime.now().year
-        meses = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
+        # Selector de Vista (Sin usar st.radio)
+        col_filtro, col_vacia = st.columns([1, 3])
+        vista_balance = col_filtro.selectbox("📅 Temporalidad del Balance:", ["Proyección Anual (12 Meses)", "Histórico Completo"])
         
+        current_year = datetime.datetime.now().year
+        
+        # Lógica de agrupación de meses según la vista seleccionada
+        if vista_balance == "Proyección Anual (12 Meses)":
+            meses = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
+            titulo_metricas = "Proyección Anual (Año en Curso)"
+            desc_metricas = "Esta vista asume tu nómina y gastos fijos sostenidos por los 12 meses del año actual."
+        else:
+            meses_set = set()
+            # 1. Extraer todos los meses de los proyectos existentes
+            if not st.session_state.proyectos_resumen.empty:
+                for val in st.session_state.proyectos_resumen["Fecha_Termino_Proy"]:
+                    val_str = str(val)
+                    # Tomar solo el formato YYYY-MM
+                    if val_str != "Pendiente" and len(val_str) >= 7:
+                        meses_set.add(val_str[:7])
+            
+            # 2. Asegurar que al menos el año actual completo esté visible para dar contexto
+            for i in range(1, 13):
+                meses_set.add(f"{current_year}-{str(i).zfill(2)}")
+                
+            meses = sorted(list(meses_set))
+            titulo_metricas = "Balance Histórico Acumulado"
+            desc_metricas = "Esta vista proyecta todos los meses registrados en la historia de la empresa."
+
         df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
         fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
         
@@ -961,13 +986,13 @@ elif st.session_state.menu_actual == "Balance":
                             gastos_asoc = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == row["Proyecto"]]["Monto"].sum()
                             costos_proy_mes += float(gastos_asoc)
             
-            # Se agrupan los egresos para mostrar exactamente 2 barras por mes (como en tu imagen)
+            # Se agrupan los egresos para mostrar exactamente 2 barras por mes
             egresos_totales_mes = costo_nomina_mensual + fijos_mensuales + costos_proy_mes
             
             datos_grafico.append({"Mes": mes, "Tipo": "Ingresos (+)", "Monto": ingresos_mes})
             datos_grafico.append({"Mes": mes, "Tipo": "Egresos (-)", "Monto": egresos_totales_mes})
             
-        df_anual = pd.DataFrame(datos_grafico)
+        df_balance = pd.DataFrame(datos_grafico)
         
         # Tooltip inteligente que evalúa si es un ingreso (+) o egreso (-)
         def formato_tooltip_millones(row):
@@ -978,32 +1003,32 @@ elif st.session_state.menu_actual == "Balance":
             else:
                 return f"-{val_str}M CLP"
                 
-        df_anual["Detalle_Tooltip"] = df_anual.apply(formato_tooltip_millones, axis=1)
+        df_balance["Detalle_Tooltip"] = df_balance.apply(formato_tooltip_millones, axis=1)
         
-        ingresos_totales = df_anual[df_anual["Tipo"] == "Ingresos (+)"]["Monto"].sum()
-        egresos_totales = df_anual[df_anual["Tipo"] == "Egresos (-)"]["Monto"].sum()
+        ingresos_totales = df_balance[df_balance["Tipo"] == "Ingresos (+)"]["Monto"].sum()
+        egresos_totales = df_balance[df_balance["Tipo"] == "Egresos (-)"]["Monto"].sum()
         rentabilidad = ingresos_totales - egresos_totales
         
         with st.container(border=True):
-            st.markdown("#### 💡 Proyección Anual (Año en Curso)")
-            st.caption("Esta vista asume tu nómina y gastos fijos sostenidos por los 12 meses, sumando tus proyectos facturados/pendientes en sus respectivos meses de término.")
+            st.markdown(f"#### 💡 {titulo_metricas}")
+            st.caption(desc_metricas)
             c1, c2, c3 = st.columns(3)
             c1.metric("Ingresos Acumulados Proyectados", formato_clp(ingresos_totales))
             c2.metric("Egresos Acumulados Proyectados", formato_clp(egresos_totales))
-            c3.metric("Rentabilidad Neta Anual", formato_clp(rentabilidad))
+            c3.metric("Rentabilidad Neta", formato_clp(rentabilidad))
             
         st.write("") 
         
         with st.container(border=True):
-            st.markdown("#### 📈 Estado de Resultado Anual (Mensualizado)")
-            st.caption("Análisis de flujo de caja mes a mes. Las barras muestran el balance de ingresos y salidas de capital.")
+            st.markdown("#### 📈 Estado de Resultado Mensualizado")
+            st.caption("Análisis de flujo de caja. Las barras muestran el balance de ingresos y salidas de capital por mes.")
             
-            # Gráfico con el EJE Y estrictamente fijado en 0, 50 y 100 Millones, y solo 2 barras por mes
-            grafico_anual = alt.Chart(df_anual).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
-                x=alt.X("Mes:O", title="Meses del Año", sort=meses, axis=alt.Axis(labelAngle=-45)),
+            # Gráfico con el EJE Y estrictamente fijado en 0, 50 y 100 Millones
+            grafico_balance = alt.Chart(df_balance).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
+                x=alt.X("Mes:O", title="Períodos", sort=meses, axis=alt.Axis(labelAngle=-45)),
                 xOffset=alt.XOffset("Tipo:N", sort=["Ingresos (+)", "Egresos (-)"]),
                 
-                # AQUI ESTÁ LA MAGIA: Forzamos la escala [0 a 100 Millones] y marcamos solo las divisiones de 0, 50 y 100
+                # Escala estricta [0 a 100 Millones] con marcas en 0, 50 y 100
                 y=alt.Y("Monto:Q", 
                         title="", 
                         scale=alt.Scale(domain=[0, 100000000]), 
@@ -1020,4 +1045,4 @@ elif st.session_state.menu_actual == "Balance":
                 ]
             ).properties(height=450)
             
-            st.altair_chart(grafico_anual, use_container_width=True)
+            st.altair_chart(grafico_balance, use_container_width=True)
