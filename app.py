@@ -279,12 +279,11 @@ if not st.session_state.acceso_app:
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-# 1. Ajustamos el balance: le damos más peso al logo (2.2) y ajustamos la navegación (8.3)
+# Balance de columnas optimizado para evitar cortes (2.2 - 8.3 - 1.5)
 col_logo, col_nav, col_settings = st.columns([2.2, 8.3, 1.5], vertical_alignment="center")
 
 with col_logo:
-    # 2. Reemplazamos use_container_width=True por un ancho fijo.
-    # Prueba con 150, 180 o 200 dependiendo de las proporciones exactas de tu archivo PNG.
+    # Ancho fijo para proteger el aspecto del logo
     st.image(LOGO_URL, width=160)
 
 with col_nav:
@@ -298,6 +297,23 @@ with col_nav:
 
 with col_settings:
     with st.popover("⚙️ Ajustes", use_container_width=True):
+        st.markdown("**Opciones Globales**")
+        if st.button("🔄 Sincronizar", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']: del st.session_state[key]
+            st.rerun()
+        if st.button("🔒 Bloquear", use_container_width=True):
+            st.session_state.acceso_finanzas = "ninguno"
+            st.session_state.acceso_proyectos = "ninguno"
+            st.rerun()
+        if st.button("🚪 Salir", use_container_width=True):
+            st.session_state.acceso_app = False
+            st.session_state.acceso_finanzas = "ninguno"
+            st.session_state.acceso_proyectos = "ninguno"
+            st.rerun()
+            
+st.divider()
+
 # ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
