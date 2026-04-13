@@ -279,7 +279,7 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR
+# 5. NAVEGACIÓN SUPERIOR (LAYOUT EN 2 NIVELES)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
@@ -426,7 +426,7 @@ if st.session_state.menu_actual == "Finanzas":
                             mime="application/pdf", type="primary", use_container_width=True
                         )
                 else:
-                    st.error("⚠️ La librería para crear PDFs no está instalada.")
+                    st.error("⚠️ La librería para crear PDFs no está instalada. Ejecuta 'pip install fpdf' o añádelo a tu requirements.txt")
 
         with tab_fijos:
             with st.container(border=True):
@@ -468,6 +468,7 @@ if st.session_state.menu_actual == "Finanzas":
 # ==========================================
 elif st.session_state.menu_actual == "Presupuestos":
     st.markdown("### Gestión de Presupuestos y Cotizaciones")
+    
     with st.container(border=True):
         with st.expander("➕ Crear Nueva Cotización / Presupuesto", expanded=False):
             tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True)
@@ -490,7 +491,9 @@ elif st.session_state.menu_actual == "Presupuestos":
             if 'input_monto_presupuesto' not in st.session_state: st.session_state['input_monto_presupuesto'] = "0"
             colP3.text_input("Monto Total Cotizado (CLP):", key="input_monto_presupuesto", on_change=formatear_input, kwargs={'llave': 'input_monto_presupuesto'})
             monto_pres = float(st.session_state['input_monto_presupuesto'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-            fecha_pres = colP4.date_input("Fecha de Emisión:")
+            
+            # --- Calendario con formato Chileno DD/MM/YYYY ---
+            fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY")
             
             colP5, colP6, colP7 = st.columns(3)
             aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["Pendiente", "Aprobada", "No Aprobada"])
@@ -500,10 +503,11 @@ elif st.session_state.menu_actual == "Presupuestos":
             
             if st.button("Guardar Presupuesto", type="primary"):
                 if ref_pres and cliente_pres and monto_pres > 0:
+                    str_fecha = fecha_pres.strftime('%Y-%m-%d') if fecha_pres else ""
                     nuevo_presupuesto = pd.DataFrame([{
                         "Tipo": tipo_pres, "Referencia": ref_pres, "Cliente": cliente_pres,
                         "Monto": monto_pres, "Aprobacion": aprobacion_pres, "Orden_Compra": orden_pres,
-                        "Num_OC": num_oc_pres, "Estado_Comercial": "Presupuestada", "Fecha_Emision": str(fecha_pres)
+                        "Num_OC": num_oc_pres, "Estado_Comercial": "Presupuestada", "Fecha_Emision": str_fecha
                     }])
                     st.session_state.presupuestos = pd.concat([st.session_state.presupuestos, nuevo_presupuesto], ignore_index=True)
                     guardar_datos("Presupuestos", st.session_state.presupuestos)
@@ -518,6 +522,7 @@ elif st.session_state.menu_actual == "Presupuestos":
         if st.session_state.presupuestos.empty:
             st.info("Aún no hay cotizaciones emitidas en el sistema.")
         else:
+            st.caption("Actualiza el estado, la aprobación o el número de OC directamente en la tabla:")
             opciones_estado = ["Presupuestada", "Adjudicada", "En progreso", "Entregada", "Pagada"]
             opciones_aprobacion = ["Pendiente", "Aprobada", "No Aprobada"]
             opciones_orden = ["Sin Orden", "Con Orden"]
@@ -703,12 +708,10 @@ elif st.session_state.menu_actual == "Operaciones":
         with st.container(border=True):
             st.markdown("#### 1️⃣ Cronograma General del Proyecto")
             colF1, colF2, colF3 = st.columns(3)
-            
             val_ini = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"]
             val_fin = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"]
             val_dur = st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"]
             
-            # --- NUEVO: Convertidor seguro de fechas para el calendario ---
             def parse_fecha(f_str):
                 try:
                     if pd.isna(f_str) or str(f_str).strip() in ["", "Pendiente"]: 
@@ -717,13 +720,13 @@ elif st.session_state.menu_actual == "Operaciones":
                 except:
                     return None
             
-            # Utilizamos st.date_input para forzar formato estricto y permitir calendario interactivo
-            nuevo_ini = colF1.date_input("Fecha de Inicio:", value=parse_fecha(val_ini))
-            nuevo_fin = colF2.date_input("Fecha de Término:", value=parse_fecha(val_fin))
-            nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 3 meses")
+            # --- Calendarios Interactivos con formato Chileno DD/MM/YYYY ---
+            nuevo_ini = colF1.date_input("Fecha de Inicio:", value=parse_fecha(val_ini), format="DD/MM/YYYY")
+            nuevo_fin = colF2.date_input("Fecha de Término:", value=parse_fecha(val_fin), format="DD/MM/YYYY")
             
+            nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 3 meses")
             if st.button("Guardar Fechas del Proyecto"):
-                # Formateamos estrictamente a YYYY-MM-DD al guardar para garantizar que el módulo Balance funcione perfecto
+                # Conversión interna a YYYY-MM-DD para la base de datos y gráficos
                 str_ini = nuevo_ini.strftime('%Y-%m-%d') if nuevo_ini else "Pendiente"
                 str_fin = nuevo_fin.strftime('%Y-%m-%d') if nuevo_fin else "Pendiente"
                 
@@ -895,6 +898,7 @@ elif st.session_state.menu_actual == "Inventario":
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
     
+    # 1. Definir bases de fechas y extracción de datos globales
     current_year = datetime.datetime.now().year
     meses_año_actual = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
     meses_set = set(meses_año_actual)
@@ -930,12 +934,15 @@ elif st.session_state.menu_actual == "Balance":
         
     df_full = pd.DataFrame(datos_grafico)
 
+    # 2. Renderizado del recuadro principal
     with st.container(border=True):
         st.markdown("#### 💡 Balance Financiero Acumulado")
         
+        # El selector ahora está dentro del contenedor y debajo del título
         col_f1, col_f2 = st.columns(2)
         vista_balance = col_f1.selectbox("📅 Temporalidad del Balance:", ["Proyección Anual (12 Meses)", "Vista Mensual Específica", "Histórico Completo"])
         
+        # Filtros basados en la selección
         if vista_balance == "Proyección Anual (12 Meses)":
             meses_filtrados = meses_año_actual
             titulo_metricas = "Proyección Anual (Año en Curso)"
@@ -947,13 +954,14 @@ elif st.session_state.menu_actual == "Balance":
             meses_filtrados = [mes_seleccionado]
             titulo_metricas = f"Balance del Mes: {mes_seleccionado}"
             desc_metricas = "Análisis aislado de ingresos y egresos para el mes seleccionado."
-        else: 
+        else: # Histórico
             meses_filtrados = meses_totales
             titulo_metricas = "Balance Histórico Acumulado"
             desc_metricas = "Suma global de todos los meses y proyectos registrados."
             
         df_filtrado = df_full[df_full["Mes"].isin(meses_filtrados)].copy()
         
+        # Formato de Tooltips en CLP Millones
         def formato_tooltip_millones(row):
             val_m = row["Monto"] / 1000000
             val_str = f"{int(val_m)}" if val_m.is_integer() else f"{val_m:.1f}"
@@ -961,6 +969,7 @@ elif st.session_state.menu_actual == "Balance":
             
         df_filtrado["Detalle_Tooltip"] = df_filtrado.apply(formato_tooltip_millones, axis=1)
         
+        # Cálculo de métricas filtradas
         ingresos_totales = df_filtrado[df_filtrado["Tipo"] == "Ingresos (+)"]["Monto"].sum()
         egresos_totales = df_filtrado[df_filtrado["Tipo"] == "Egresos (-)"]["Monto"].sum()
         rentabilidad = ingresos_totales - egresos_totales
@@ -980,20 +989,25 @@ elif st.session_state.menu_actual == "Balance":
         st.markdown("#### 📈 Estado de Resultado Mensualizado")
         st.caption("Las barras muestran el balance de ingresos y salidas de capital.")
         
+        # Lógica de dibujo del Eje X: Si es anual o mensual, forzamos a mostrar los 12 meses
         if vista_balance == "Histórico Completo":
-            x_scale = alt.Scale() 
+            x_scale = alt.Scale() # Autoajuste a todo el historial
             x_sort = meses_totales
         else:
-            x_scale = alt.Scale(domain=meses_año_actual) 
+            x_scale = alt.Scale(domain=meses_año_actual) # Fuerza la aparición de los 12 meses del año
             x_sort = meses_año_actual
             
+        # Gráfico estricto con los parámetros solicitados
         grafico_balance = alt.Chart(df_filtrado).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
             x=alt.X("Mes:O", title="Períodos", sort=x_sort, scale=x_scale, axis=alt.Axis(labelAngle=-45)),
             xOffset=alt.XOffset("Tipo:N", sort=["Ingresos (+)", "Egresos (-)"]),
+            
+            # Eje Y estricto en 0, 50 y 100 Millones
             y=alt.Y("Monto:Q", 
                     title="", 
                     scale=alt.Scale(domain=[0, 100000000]), 
                     axis=alt.Axis(values=[0, 50000000, 100000000], labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
+            
             color=alt.Color("Tipo:N", 
                             scale=alt.Scale(domain=["Ingresos (+)", "Egresos (-)"], 
                                             range=["#3b82f6", "#e53e3e"]),
