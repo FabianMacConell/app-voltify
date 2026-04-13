@@ -34,7 +34,6 @@ ocultar_menu_estilo = """
                 width: auto !important;
                 display: block;
             }
-            /* Ocultar elementos fantasma de radio si el navegador los guardó en caché */
             div[role="radiogroup"] { display: none !important; }
             </style>
             """
@@ -280,7 +279,7 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (BOTONERA INTELIGENTE)
+# 5. NAVEGACIÓN SUPERIOR (BOTONERA 100% SIN ESFERAS)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
@@ -962,6 +961,7 @@ elif st.session_state.menu_actual == "Balance":
             
         df_anual = pd.DataFrame(datos_grafico)
         
+        # Tooltip inteligente que evalúa si es un ingreso (+) o egreso (-)
         def formato_tooltip_millones(row):
             val_m = row["Monto"] / 1000000
             if val_m.is_integer():
@@ -993,11 +993,17 @@ elif st.session_state.menu_actual == "Balance":
             st.markdown("#### 📈 Estado de Resultado Anual (Mensualizado)")
             st.caption("Análisis de flujo de caja mes a mes. Las barras muestran el balance de ingresos y salidas de capital.")
             
-            # Gráfico de Barras Agrupadas con Altair (Igual a tu imagen de referencia)
+            # Gráfico con el EJE Y estrictamente fijado en 0, 50 y 100 Millones
             grafico_anual = alt.Chart(df_anual).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
                 x=alt.X("Mes:O", title="Meses del Año", sort=meses, axis=alt.Axis(labelAngle=-45)),
                 xOffset=alt.XOffset("Categoría:N", sort=["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"]),
-                y=alt.Y("Monto:Q", title="Monto en CLP (Millones)", scale=alt.Scale(domainMin=0), axis=alt.Axis(labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
+                
+                # AQUI ESTÁ LA MAGIA: Forzamos la escala [0 a 100 Millones] y marcamos solo las divisiones de 0, 50 y 100
+                y=alt.Y("Monto:Q", 
+                        title="Monto en CLP (Millones)", 
+                        scale=alt.Scale(domain=[0, 100000000]), 
+                        axis=alt.Axis(tickCount=3, values=[0, 50000000, 100000000], labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
+                
                 color=alt.Color("Categoría:N", 
                                 scale=alt.Scale(domain=["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"], 
                                                 range=["#3182bd", "#fd8d3c", "#d62728"]),
