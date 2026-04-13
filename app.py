@@ -21,35 +21,15 @@ except ImportError:
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
+# CSS Limpio sin hacks que rompan los márgenes
 ocultar_menu_estilo = """
             <style>
-            /* Ocultar elementos de Streamlit */
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
-            
-            /* Aprovechar el 100% de la pantalla y ajustar espaciados */
             .block-container {
                 padding-top: 1.5rem !important;
                 padding-bottom: 2rem !important;
-                padding-left: 2rem !important;
-                padding-right: 2rem !important;
-                max-width: 100% !important;
             }
-            
-            /* Forzar que los botones de navegación NO salten a dos líneas */
-            div[data-testid="stButton"] button {
-                white-space: nowrap !important;
-                padding: 0.5rem 0.2rem !important;
-            }
-            
-            /* Mantener proporciones del logo */
-            [data-testid="column"] img {
-                max-height: 45px !important;
-                width: auto !important;
-                display: block;
-            }
-            
-            /* Limpieza de fantasmas visuales */
             div[role="radiogroup"] { display: none !important; }
             </style>
             """
@@ -299,12 +279,12 @@ if not st.session_state.acceso_app:
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-# Ajuste de proporciones para dar más espacio a los botones y fijar el logo a la izquierda
-col_logo, col_nav, col_settings = st.columns([1.2, 8.5, 1.3], vertical_alignment="center")
+# Balance de columnas optimizado para evitar cortes (1.5 - 8.5 - 1.5)
+col_logo, col_nav, col_settings = st.columns([1.5, 8.5, 1.5], vertical_alignment="center")
 
-with col_logo: 
-    # Ancho fijo de 160px para el logo, evitando que se expanda o reduzca de más
-    st.image(LOGO_URL, width=160)
+with col_logo:
+    # use_container_width=True se adapta al tamaño real de la columna 1.5 sin forzar píxeles
+    st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
     b1, b2, b3, b4, b5, b6 = st.columns(6)
@@ -963,7 +943,6 @@ elif st.session_state.menu_actual == "Balance":
         
         datos_grafico = []
         for mes in meses:
-            datos_grafico.append({"Mes": mes, "Categoría": "Gastos Fijos y Nómina", "Monto": (costo_nomina_mensual + fijos_mensuales)})
             ingresos_mes = 0
             costos_proy_mes = 0
             
@@ -976,27 +955,27 @@ elif st.session_state.menu_actual == "Balance":
                             gastos_asoc = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == row["Proyecto"]]["Monto"].sum()
                             costos_proy_mes += float(gastos_asoc)
             
-            datos_grafico.append({"Mes": mes, "Categoría": "Ingresos por Ventas/Proyectos", "Monto": ingresos_mes})
-            datos_grafico.append({"Mes": mes, "Categoría": "Costos Directos Proyectos", "Monto": costos_proy_mes})
+            # Se agrupan los egresos para mostrar exactamente 2 barras por mes (como en tu imagen)
+            egresos_totales_mes = costo_nomina_mensual + fijos_mensuales + costos_proy_mes
+            
+            datos_grafico.append({"Mes": mes, "Tipo": "Ingresos (+)", "Monto": ingresos_mes})
+            datos_grafico.append({"Mes": mes, "Tipo": "Egresos (-)", "Monto": egresos_totales_mes})
             
         df_anual = pd.DataFrame(datos_grafico)
         
         # Tooltip inteligente que evalúa si es un ingreso (+) o egreso (-)
         def formato_tooltip_millones(row):
             val_m = row["Monto"] / 1000000
-            if val_m.is_integer():
-                val_str = f"{int(val_m)}"
-            else:
-                val_str = f"{val_m:.1f}"
-            if row["Categoría"] == "Ingresos por Ventas/Proyectos":
+            val_str = f"{int(val_m)}" if val_m.is_integer() else f"{val_m:.1f}"
+            if row["Tipo"] == "Ingresos (+)":
                 return f"+{val_str}M CLP"
             else:
                 return f"-{val_str}M CLP"
                 
         df_anual["Detalle_Tooltip"] = df_anual.apply(formato_tooltip_millones, axis=1)
         
-        ingresos_totales = df_anual[df_anual["Categoría"] == "Ingresos por Ventas/Proyectos"]["Monto"].sum()
-        egresos_totales = df_anual[df_anual["Categoría"] != "Ingresos por Ventas/Proyectos"]["Monto"].sum()
+        ingresos_totales = df_anual[df_anual["Tipo"] == "Ingresos (+)"]["Monto"].sum()
+        egresos_totales = df_anual[df_anual["Tipo"] == "Egresos (-)"]["Monto"].sum()
         rentabilidad = ingresos_totales - egresos_totales
         
         with st.container(border=True):
@@ -1013,24 +992,24 @@ elif st.session_state.menu_actual == "Balance":
             st.markdown("#### 📈 Estado de Resultado Anual (Mensualizado)")
             st.caption("Análisis de flujo de caja mes a mes. Las barras muestran el balance de ingresos y salidas de capital.")
             
-            # Gráfico con el EJE Y estrictamente fijado en 0, 50 y 100 Millones
-            grafico_anual = alt.Chart(df_anual).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+            # Gráfico con el EJE Y estrictamente fijado en 0, 50 y 100 Millones, y solo 2 barras por mes
+            grafico_anual = alt.Chart(df_anual).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
                 x=alt.X("Mes:O", title="Meses del Año", sort=meses, axis=alt.Axis(labelAngle=-45)),
-                xOffset=alt.XOffset("Categoría:N", sort=["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"]),
+                xOffset=alt.XOffset("Tipo:N", sort=["Ingresos (+)", "Egresos (-)"]),
                 
                 # AQUI ESTÁ LA MAGIA: Forzamos la escala [0 a 100 Millones] y marcamos solo las divisiones de 0, 50 y 100
                 y=alt.Y("Monto:Q", 
-                        title="Monto en CLP (Millones)", 
+                        title="", 
                         scale=alt.Scale(domain=[0, 100000000]), 
-                        axis=alt.Axis(tickCount=3, values=[0, 50000000, 100000000], labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
+                        axis=alt.Axis(values=[0, 50000000, 100000000], labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
                 
-                color=alt.Color("Categoría:N", 
-                                scale=alt.Scale(domain=["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"], 
-                                                range=["#3182bd", "#fd8d3c", "#d62728"]),
+                color=alt.Color("Tipo:N", 
+                                scale=alt.Scale(domain=["Ingresos (+)", "Egresos (-)"], 
+                                                range=["#3b82f6", "#e53e3e"]),
                                 legend=alt.Legend(title="", orient="right")),
                 tooltip=[
                     alt.Tooltip("Mes:O", title="Período"),
-                    alt.Tooltip("Categoría:N", title="Concepto"),
+                    alt.Tooltip("Tipo:N", title="Concepto"),
                     alt.Tooltip("Detalle_Tooltip:N", title="Impacto en Caja")
                 ]
             ).properties(height=450)
