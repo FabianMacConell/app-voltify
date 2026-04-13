@@ -21,19 +21,20 @@ except ImportError:
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
+# CSS Limpio: Damos más espacio horizontal a toda la página y quitamos restricciones de imagen
 ocultar_menu_estilo = """
             <style>
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
+            
+            /* Damos aire superior y ensanchamos la zona de trabajo útil */
             .block-container {
-                padding-top: 1.5rem !important;
+                padding-top: 2.5rem !important;
                 padding-bottom: 2rem !important;
+                max-width: 95% !important; 
             }
-            [data-testid="column"] img {
-                max-height: 45px !important;
-                width: auto !important;
-                display: block;
-            }
+            
+            /* Ocultar elementos fantasma de radio si el navegador los guardó en caché */
             div[role="radiogroup"] { display: none !important; }
             </style>
             """
@@ -279,12 +280,16 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (BOTONERA 100% SIN ESFERAS)
+# 5. NAVEGACIÓN SUPERIOR (TOTALMENTE REDISEÑADA PARA NO CORTAR NADA)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-col_logo, col_nav, col_settings = st.columns([1.5, 7.5, 1.5], vertical_alignment="center")
-with col_logo: st.image(LOGO_URL, use_container_width=True)
+# Proporciones actualizadas: Logo fijo a la izquierda, botones con mucho espacio al centro
+col_logo, col_nav, col_settings = st.columns([2, 8, 1.5], vertical_alignment="center")
+
+with col_logo:
+    # Usamos width=180 para forzar el tamaño de la imagen y que Streamlit no la aplaste
+    st.image(LOGO_URL, width=180)
 
 with col_nav:
     b1, b2, b3, b4, b5, b6 = st.columns(6)
