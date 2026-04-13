@@ -26,7 +26,7 @@ ocultar_menu_estilo = """
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
             .block-container {
-                padding-top: 2rem !important;
+                padding-top: 1.5rem !important;
                 padding-bottom: 2rem !important;
             }
             [data-testid="column"] img {
@@ -34,6 +34,8 @@ ocultar_menu_estilo = """
                 width: auto !important;
                 display: block;
             }
+            /* Ocultar elementos fantasma de radio si el navegador los guardó en caché */
+            div[role="radiogroup"] { display: none !important; }
             </style>
             """
 st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
@@ -133,6 +135,9 @@ if 'gastos_fijos' not in st.session_state:
 if 'inventario' not in st.session_state:
     df_inventario_base = pd.DataFrame(columns=["Artículo", "Cantidad", "Nro_Serie", "Estado"])
     st.session_state.inventario = cargar_datos("Inventario", df_inventario_base)
+
+if 'ultima_etiqueta' not in st.session_state:
+    st.session_state.ultima_etiqueta = None
 
 def formato_clp(valor):
     try: return f"${int(valor):,.0f}".replace(",", ".")
@@ -235,21 +240,13 @@ def generar_pdf_liquidacion(datos):
     return pdf_bytes
 
 def generar_etiqueta_pdf(serie):
-    # Formato personalizado miniatura: 80mm de ancho x 25mm de alto
     pdf = FPDF(format=(80, 25))
     pdf.add_page()
-    
-    # Bajar un poco para que quede centrado verticalmente
     pdf.set_y(5) 
-    
-    # Nombre de la empresa arriba
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(0, 6, "VOLTIFY SpA", ln=True, align='C')
-    
-    # Nro de Serie limpio y grande abajo
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 8, f"{serie}", ln=True, align='C')
-    
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
     with open(temp_path, "rb") as f: pdf_bytes = f.read()
@@ -283,7 +280,7 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (BOTONERA INTELIGENTE)
+# 5. NAVEGACIÓN SUPERIOR (BOTONERA 100% SIN ESFERAS)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
@@ -291,9 +288,10 @@ col_logo, col_nav, col_settings = st.columns([1.5, 7.5, 1.5], vertical_alignment
 with col_logo: st.image(LOGO_URL, use_container_width=True)
 
 with col_nav:
+    # Usamos botones de Streamlit, no hay radios, por ende NO HAY CIRCUNFERENCIAS.
     b1, b2, b3, b4, b5, b6 = st.columns(6)
     if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
-    if b2.button("📝 Presup.", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
+    if b2.button("📝 Presupuestos", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
     if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
     if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True): st.session_state.menu_actual = "Operaciones"; st.rerun()
     if b5.button("📦 Inventario", type="primary" if st.session_state.menu_actual == "Inventario" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inventario"; st.rerun()
@@ -302,7 +300,7 @@ with col_nav:
 with col_settings:
     with st.popover("⚙️ Ajustes", use_container_width=True):
         st.markdown("**Opciones Globales**")
-        if st.button("🔄 Sincronizar", use_container_width=True):
+        if st.button("🔄 Sincronizar Base", use_container_width=True):
             for key in list(st.session_state.keys()):
                 if key not in ['acceso_app', 'acceso_finanzas', 'acceso_proyectos']: del st.session_state[key]
             st.rerun()
@@ -310,7 +308,7 @@ with col_settings:
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
             st.rerun()
-        if st.button("🚪 Salir", use_container_width=True):
+        if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state.acceso_app = False
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
@@ -712,9 +710,9 @@ elif st.session_state.menu_actual == "Operaciones":
             val_fin = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"]
             val_dur = st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"]
             
-            nuevo_ini = colF1.text_input("Fecha de Inicio:", value="" if val_ini=="Pendiente" else val_ini, placeholder="Ej: 01/10/2026")
-            nuevo_fin = colF2.text_input("Fecha de Término:", value="" if val_fin=="Pendiente" else val_fin, placeholder="Ej: 15/12/2026")
-            nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 2.5 meses")
+            nuevo_ini = colF1.text_input("Fecha de Inicio:", value="" if val_ini=="Pendiente" else val_ini, placeholder="Ej: 2026-03")
+            nuevo_fin = colF2.text_input("Fecha de Término:", value="" if val_fin=="Pendiente" else val_fin, placeholder="Ej: 2026-06")
+            nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 3 meses")
             
             if st.button("Guardar Fechas del Proyecto"):
                 st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"] = nuevo_ini if nuevo_ini else "Pendiente"
@@ -829,7 +827,7 @@ elif st.session_state.menu_actual == "Operaciones":
                                 st.rerun()
 
 # ==========================================
-# PANTALLA NUEVA: INVENTARIO
+# PANTALLA 5: INVENTARIO
 # ==========================================
 elif st.session_state.menu_actual == "Inventario":
     st.markdown("### 📦 Control de Inventario y Activos")
@@ -869,7 +867,6 @@ elif st.session_state.menu_actual == "Inventario":
                 else:
                     st.error("Por favor completa el nombre del artículo.")
                     
-    # --- MÓDULO DE IMPRESIÓN DE ETIQUETAS A DEMANDA ---
     with st.container(border=True):
         st.markdown("#### 🖨️ Generador de Etiquetas de Código")
         if st.session_state.inventario.empty:
@@ -908,7 +905,7 @@ elif st.session_state.menu_actual == "Inventario":
                     "Estado": st.column_config.SelectboxColumn("Estado", options=["Disponible", "En Uso", "En Reparación", "Extraviado"]),
                     "Nro_Serie": st.column_config.TextColumn("N° de Serie (Automático)")
                 },
-                disabled=["Artículo", "Nro_Serie"], # Protegemos el nombre y serie para que no se alteren
+                disabled=["Artículo", "Nro_Serie"], 
                 hide_index=True, use_container_width=True, key="ed_inv"
             )
             
@@ -929,7 +926,7 @@ elif st.session_state.menu_actual == "Inventario":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 6: BALANCE TOTAL (CON GRÁFICOS)
+# PANTALLA 6: BALANCE TOTAL Y GRÁFICOS
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
     st.markdown("### 📊 Balance General y Estadísticas")
@@ -939,83 +936,69 @@ elif st.session_state.menu_actual == "Balance":
             st.warning("🔒 Esta sección consolida información confidencial de Voltify.")
             st.info("Por favor, ve a la pestaña 'Finanzas' e inicia sesión para desbloquear el Balance Total.")
     else:
-        with st.container(border=True):
-            st.write("Filtra la información para ver el rendimiento en distintos periodos:")
-            
-            col_f1, col_f2 = st.columns(2)
-            tipo_vista = col_f1.selectbox("Seleccionar Escenario Contable:", ["Vista Mensual (Mes actual)", "Proyección Anual (12 meses)", "Histórico Global"])
-            
-            ingresos_base = pd.to_numeric(st.session_state.proyectos_resumen["Cobro"], errors='coerce').sum() if not st.session_state.proyectos_resumen.empty else 0
-            costos_proy_base = pd.to_numeric(st.session_state.proyectos_gastos["Monto"], errors='coerce').sum() if not st.session_state.proyectos_gastos.empty else 0
-            df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
-            fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
-            
-            if tipo_vista == "Vista Mensual (Mes actual)":
-                multiplicador = 1
-                ingresos_calc = ingresos_base
-                costos_proy_calc = costos_proy_base
-            elif tipo_vista == "Proyección Anual (12 meses)":
-                multiplicador = 12
-                ingresos_calc = ingresos_base
-                costos_proy_calc = costos_proy_base
-                st.caption("ℹ️ *La proyección anual multiplica tus sueldos y arriendos por 12 para estimar la carga fija del año.*")
-            else:
-                multiplicador = 1 
-                ingresos_calc = ingresos_base
-                costos_proy_calc = costos_proy_base
-                
-            costo_nomina_calc = costo_nomina_mensual * multiplicador
-            fijos_calc = fijos_mensuales * multiplicador
-            
-            egresos_totales = costos_proy_calc + costo_nomina_calc + fijos_calc
-            rentabilidad = ingresos_calc - egresos_totales
-            
-            st.divider()
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Ingresos Totales (Proyectos)", formato_clp(ingresos_calc))
-            c2.metric("Egresos Totales (Proy + Nómina + Fijos)", formato_clp(egresos_totales))
-            c3.metric("Utilidad Neta / Rentabilidad", formato_clp(rentabilidad))
-            
-            if rentabilidad > 0: st.success("📈 Análisis: La empresa se encuentra en números verdes (Rentable).")
-            elif rentabilidad < 0: st.error(f"📉 Alerta: Los gastos superan a los ingresos en {formato_clp(abs(rentabilidad))}.")
-            else: st.info("⚖️ Análisis: La empresa se encuentra en su punto de equilibrio.")
-            
-        st.markdown("#### 📈 Dashboard de Rendimiento Financiero")
-        vista_grafico = st.selectbox("Seleccionar Gráfico a visualizar:", 
-                                     ["📊 Comparativa de Flujo de Caja (Ingresos vs Egresos)", 
-                                      "🍩 Desglose de Fugas de Capital (Distribución de Egresos)"])
+        # Generar datos del año en curso
+        current_year = datetime.datetime.now().year
+        meses = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
         
+        # Cálculos mensuales fijos
+        df_liq, costo_nomina_mensual = calcular_liquidaciones(st.session_state.nomina)
+        fijos_mensuales = pd.to_numeric(st.session_state.gastos_fijos["Monto (CLP)"], errors='coerce').sum()
+        
+        datos_grafico = []
+        
+        # Procesar los 12 meses para el Gráfico Anual
+        for mes in meses:
+            # 1. Costos fijos en todos los meses
+            datos_grafico.append({"Mes": mes, "Categoría": "Gastos Fijos y Nómina", "Monto": (costo_nomina_mensual + fijos_mensuales)})
+            
+            ingresos_mes = 0
+            costos_proy_mes = 0
+            
+            # 2. Distribuir proyectos en sus meses de término
+            if not st.session_state.proyectos_resumen.empty:
+                for idx, row in st.session_state.proyectos_resumen.iterrows():
+                    fecha_term = str(row.get("Fecha_Termino_Proy", ""))
+                    
+                    # Si el proyecto coincide con el mes actual del loop
+                    if fecha_term.startswith(mes) or (fecha_term in ["Pendiente", ""] and mes == f"{current_year}-{str(datetime.datetime.now().month).zfill(2)}"):
+                        ingresos_mes += float(row.get("Cobro", 0))
+                        
+                        # Buscar gastos asociados a este proyecto
+                        if not st.session_state.proyectos_gastos.empty:
+                            gastos_asoc = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == row["Proyecto"]]["Monto"].sum()
+                            costos_proy_mes += float(gastos_asoc)
+            
+            datos_grafico.append({"Mes": mes, "Categoría": "Ingresos por Ventas/Proyectos", "Monto": ingresos_mes})
+            datos_grafico.append({"Mes": mes, "Categoría": "Costos Directos Proyectos", "Monto": costos_proy_mes})
+            
+        df_anual = pd.DataFrame(datos_grafico)
+        
+        # Calcular totales reales globales
+        ingresos_totales = df_anual[df_anual["Categoría"] == "Ingresos por Ventas/Proyectos"]["Monto"].sum()
+        egresos_totales = df_anual[df_anual["Categoría"] != "Ingresos por Ventas/Proyectos"]["Monto"].sum()
+        rentabilidad = ingresos_totales - egresos_totales
+        
+        with st.container(border=True):
+            st.markdown("#### 💡 Proyección Anual (Año en Curso)")
+            st.caption("Esta vista asume tu nómina y gastos fijos sostenidos por los 12 meses, sumando tus proyectos facturados/pendientes en sus respectivos meses de término.")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Ingresos Acumulados Proyectados", formato_clp(ingresos_totales))
+            c2.metric("Egresos Acumulados Proyectados", formato_clp(egresos_totales))
+            c3.metric("Rentabilidad Neta Anual", formato_clp(rentabilidad))
+            
         st.write("") 
         
-        if vista_grafico == "📊 Comparativa de Flujo de Caja (Ingresos vs Egresos)":
-            df_balance = pd.DataFrame({
-                "Categoría": ["Ingresos", "Egresos"],
-                "Monto": [ingresos_calc, egresos_totales],
-                "Color": ["#2ecc71", "#dc3545"] 
-            })
-            chart_barras = alt.Chart(df_balance).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3, size=80).encode(
-                x=alt.X("Categoría", sort=None, title="", axis=alt.Axis(labelAngle=0, labelFontSize=14)),
-                y=alt.Y("Monto", title="Monto en CLP"),
-                color=alt.Color("Color", scale=None),
-                tooltip=["Categoría", "Monto"]
-            ).properties(height=400)
-            st.altair_chart(chart_barras, use_container_width=True)
-
-        elif vista_grafico == "🍩 Desglose de Fugas de Capital (Distribución de Egresos)":
-            df_egresos = pd.DataFrame({
-                "Tipo de Gasto": ["Nómina", "Gastos Fijos", "Costos Proyectos"],
-                "Monto": [costo_nomina_calc, fijos_calc, costos_proy_calc]
-            })
-            df_egresos = df_egresos[df_egresos["Monto"] > 0]
+        with st.container(border=True):
+            st.markdown("#### 📈 Estado de Resultado Anual (Mensualizado)")
+            st.caption("Análisis de flujo de caja mes a mes. Barras azules representan ingresos, rojas/naranjas representan salidas de capital.")
             
-            if not df_egresos.empty:
-                chart_donut = alt.Chart(df_egresos).mark_arc(innerRadius=80).encode(
-                    theta=alt.Theta(field="Monto", type="quantitative"),
-                    color=alt.Color(field="Tipo de Gasto", type="nominal", 
-                                    scale=alt.Scale(range=["#004d99", "#f39c12", "#e74c3c"]), 
-                                    legend=alt.Legend(orient="bottom", title="", labelFontSize=13)),
-                    tooltip=["Tipo de Gasto", "Monto"]
-                ).properties(height=400)
-                st.altair_chart(chart_donut, use_container_width=True)
-            else:
-                st.info("No hay egresos registrados para graficar.")
+            # Usar st.bar_chart nativo para emular la imagen enviada por el usuario
+            df_pivot = df_anual.pivot(index="Mes", columns="Categoría", values="Monto")
+            # Ordenamos las columnas para que Ingresos aparezca primero (azul)
+            columnas_ordenadas = ["Ingresos por Ventas/Proyectos", "Gastos Fijos y Nómina", "Costos Directos Proyectos"]
+            # Filtrar columnas que existan en el pivot
+            columnas_ordenadas = [col for col in columnas_ordenadas if col in df_pivot.columns]
+            df_pivot = df_pivot[columnas_ordenadas]
+            
+            # Gráfico Nativo de Streamlit (Se agrupa automáticamente mes a mes)
+            st.bar_chart(df_pivot, color=["#3182bd", "#d62728", "#fd8d3c"])
