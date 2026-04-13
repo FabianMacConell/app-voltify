@@ -275,25 +275,17 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR
+# 5. NAVEGACIÓN SUPERIOR (LAYOUT EN 2 NIVELES)
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-# Balance de columnas optimizado para evitar cortes (2.2 - 8.3 - 1.5)
-col_logo, col_nav, col_settings = st.columns([2.2, 8.3, 1.5], vertical_alignment="center")
+# --- NIVEL 1: CABECERA CORPORATIVA (Logo a la izquierda, Ajustes a la derecha) ---
+col_logo, col_espacio, col_settings = st.columns([3, 7, 2], vertical_alignment="center")
 
 with col_logo:
-    # Ancho fijo para proteger el aspecto del logo
-    st.image(LOGO_URL, width=160)
-
-with col_nav:
-    b1, b2, b3, b4, b5, b6 = st.columns(6)
-    if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
-    if b2.button("📝 Presup.", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
-    if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
-    if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True): st.session_state.menu_actual = "Operaciones"; st.rerun()
-    if b5.button("📦 Inventario", type="primary" if st.session_state.menu_actual == "Inventario" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inventario"; st.rerun()
-    if b6.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True): st.session_state.menu_actual = "Balance"; st.rerun()
+    # Al tener una columna más ancha (3), el logo ya no se comprimirá.
+    # Puedes ajustar el width si lo quieres más grande o más pequeño.
+    st.image(LOGO_URL, width=200)
 
 with col_settings:
     with st.popover("⚙️ Ajustes", use_container_width=True):
@@ -311,7 +303,19 @@ with col_settings:
             st.session_state.acceso_finanzas = "ninguno"
             st.session_state.acceso_proyectos = "ninguno"
             st.rerun()
-            
+
+st.write("") # Pequeño salto de línea para dar respiro
+
+# --- NIVEL 2: BOTONERA DE MÓDULOS (Ocupa todo el ancho) ---
+b1, b2, b3, b4, b5, b6 = st.columns(6)
+
+if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
+if b2.button("📝 Presup.", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
+if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
+if b4.button("⏱️ Operaciones", type="primary" if st.session_state.menu_actual == "Operaciones" else "secondary", use_container_width=True): st.session_state.menu_actual = "Operaciones"; st.rerun()
+if b5.button("📦 Inventario", type="primary" if st.session_state.menu_actual == "Inventario" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inventario"; st.rerun()
+if b6.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True): st.session_state.menu_actual = "Balance"; st.rerun()
+
 st.divider()
 
 # ==========================================
