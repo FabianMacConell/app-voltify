@@ -21,20 +21,35 @@ except ImportError:
 # ==========================================
 st.set_page_config(page_title="ERP Voltify", page_icon="⚡", layout="wide")
 
-# CSS Limpio: Damos más espacio horizontal a toda la página y quitamos restricciones de imagen
 ocultar_menu_estilo = """
             <style>
+            /* Ocultar elementos de Streamlit */
             [data-testid="stHeaderActionElements"] {display: none !important;}
             footer {display: none !important;}
             
-            /* Damos aire superior y ensanchamos la zona de trabajo útil */
+            /* Aprovechar el 100% de la pantalla y ajustar espaciados */
             .block-container {
-                padding-top: 2.5rem !important;
+                padding-top: 1.5rem !important;
                 padding-bottom: 2rem !important;
-                max-width: 95% !important; 
+                padding-left: 2rem !important;
+                padding-right: 2rem !important;
+                max-width: 100% !important;
             }
             
-            /* Ocultar elementos fantasma de radio si el navegador los guardó en caché */
+            /* Forzar que los botones de navegación NO salten a dos líneas */
+            div[data-testid="stButton"] button {
+                white-space: nowrap !important;
+                padding: 0.5rem 0.2rem !important;
+            }
+            
+            /* Mantener proporciones del logo */
+            [data-testid="column"] img {
+                max-height: 45px !important;
+                width: auto !important;
+                display: block;
+            }
+            
+            /* Limpieza de fantasmas visuales */
             div[role="radiogroup"] { display: none !important; }
             </style>
             """
@@ -280,16 +295,16 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (TOTALMENTE REDISEÑADA PARA NO CORTAR NADA)
+# 5. NAVEGACIÓN SUPERIOR
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
-# Proporciones actualizadas: Logo fijo a la izquierda, botones con mucho espacio al centro
-col_logo, col_nav, col_settings = st.columns([2, 8, 1.5], vertical_alignment="center")
+# Ajuste de proporciones para dar más espacio a los botones y fijar el logo a la izquierda
+col_logo, col_nav, col_settings = st.columns([1.2, 8.5, 1.3], vertical_alignment="center")
 
-with col_logo:
-    # Usamos width=180 para forzar el tamaño de la imagen y que Streamlit no la aplaste
-    st.image(LOGO_URL, width=180)
+with col_logo: 
+    # Ancho fijo de 160px para el logo, evitando que se expanda o reduzca de más
+    st.image(LOGO_URL, width=160)
 
 with col_nav:
     b1, b2, b3, b4, b5, b6 = st.columns(6)
