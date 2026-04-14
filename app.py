@@ -325,22 +325,24 @@ def generar_pdf_liquidacion(datos):
     # --- Columna Izquierda (Haberes) ---
     y_h = y_t + 13
     pdf.text(12, y_h, f"Días Trabajados: {dias_trabajados},00")
-    pdf.text(60, y_h, "Sueldo:")
+    
+    # Modificación preventiva: Indentación movida a X=45
+    pdf.text(45, y_h, "Sueldo:")
     right_text(pdf, 102, y_h, formato_clp(sueldo_prop).replace("$","").strip())
     
     y_h += 6
-    pdf.text(12, y_h, "Horas : 0.0     50.00%")
-    pdf.text(60, y_h, "Total Horas Extras:")
+    pdf.text(12, y_h, "Horas : 0.0     50.00%") # Datos estáticos maqueta
+    pdf.text(45, y_h, "Total Horas Extras:")
     right_text(pdf, 102, y_h, formato_clp(datos["Horas Extras"]).replace("$","").strip())
     
     y_h += 6
-    pdf.text(60, y_h, "Gratificación:")
+    pdf.text(45, y_h, "Gratificación:")
     right_text(pdf, 102, y_h, formato_clp(datos["Gratificacion"]).replace("$","").strip())
     
     y_h += 8
     pdf.line(10, y_h - 4, 105, y_h - 4) # Divisor interno
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(60, y_h, "Total Imponible:")
+    pdf.text(45, y_h, "Total Imponible:")
     right_text(pdf, 102, y_h, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
     
@@ -352,13 +354,13 @@ def generar_pdf_liquidacion(datos):
     right_text(pdf, 102, y_h, formato_clp(datos["Movilizacion"]).replace("$","").strip())
     
     y_h += 6
-    pdf.text(60, y_h, "Asignación Colación:")
+    pdf.text(45, y_h, "Asignación Colación:")
     right_text(pdf, 102, y_h, formato_clp(datos["Colacion"]).replace("$","").strip())
     
     y_h = y_t + 110
     pdf.line(10, y_h - 4, 105, y_h - 4)
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(60, y_h, "TOTAL HABERES:")
+    pdf.text(45, y_h, "TOTAL HABERES:")
     right_text(pdf, 102, y_h, formato_clp(datos["Total Haberes"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
     
@@ -368,12 +370,14 @@ def generar_pdf_liquidacion(datos):
     
     y_d = y_t + 13
     pdf.text(107, y_d, f"AFP: {afp_nombre}")
-    pdf.text(145, y_d, "Base AFP:")
-    pdf.text(165, y_d, afp_tasa)
+    
+    # Modificación preventiva: Indentación movida a X=140
+    pdf.text(140, y_d, "Base AFP:")
+    pdf.text(160, y_d, afp_tasa)
     right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
     
     y_d += 6
-    pdf.text(145, y_d, "Cotización AFP:")
+    pdf.text(140, y_d, "Cotización AFP:")
     right_text(pdf, 198, y_d, formato_clp(datos["Dcto AFP"]).replace("$","").strip())
     
     y_d += 6
@@ -385,26 +389,26 @@ def generar_pdf_liquidacion(datos):
     
     y_d += 6
     pdf.text(107, y_d, "Cotización Pactado:")
-    pdf.text(145, y_d, "0 UF")
-    right_text(pdf, 198, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip())
+    pdf.text(140, y_d, "0 UF")
+    right_text(pdf, 198, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip()) # Según PDF, repite valor
     
     y_d += 6
-    pdf.text(145, y_d, "Base AFC:")
-    right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
-    
-    y_d += 6
-    pdf.text(145, y_d, "Cotización AFC Trabajador:")
-    right_text(pdf, 198, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
-    
-    y_d += 8
-    pdf.line(105, y_d - 4, 200, y_d - 4)
+    if datos["Dcto Cesantia"] > 0:
+        pdf.text(140, y_d, "Base AFC:")
+        right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
+        
+        y_d += 6
+        pdf.text(140, y_d, "Cotización AFC Trabajador:")
+        right_text(pdf, 198, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
+        y_d += 6
+
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(145, y_d, "Total Previsión:")
+    pdf.text(140, y_d, "Total Previsión:")
     right_text(pdf, 198, y_d, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
     
     y_d += 8
-    pdf.text(107, y_d, "Días no Trabajados")
+    pdf.text(107, y_d, "Días no Trabajador")
     
     y_d += 6
     pdf.text(107, y_d, "Licencia:")
@@ -414,7 +418,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(125, y_d, str(int(datos.get("Dias_Falta", 0))))
     
     y_d += 6
-    pdf.text(145, y_d, "Base Tributable:")
+    pdf.text(140, y_d, "Base Tributable:")
     base_trib = datos["Imponible Calculado"] - datos["Descuentos Ley"]
     if base_trib < 0: base_trib = 0
     right_text(pdf, 198, y_d, formato_clp(base_trib).replace("$","").strip())
@@ -422,37 +426,43 @@ def generar_pdf_liquidacion(datos):
     y_d = y_t + 110
     pdf.line(105, y_d - 4, 200, y_d - 4)
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(145, y_d, "TOTAL DESCUENTO")
+    pdf.text(140, y_d, "TOTAL DESCUENTO")
     right_text(pdf, 198, y_d, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
     
-    # 4. RECUADRO ALCANCE LÍQUIDO
-    y_l = 180
-    pdf.rect(140, y_l, 60, 16) # Caja de resumen
+    # Línea separadora final de totales
+    y_bottom = max(y_h, y_d) + 5
+    pdf.line(10, y_bottom, 200, y_bottom)
     
-    pdf.set_font("Arial", 'B', 10)
-    pdf.text(142, y_l + 6, "ALCANCE LIQUIDO")
-    right_text(pdf, 198, y_l + 6, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
+    # --- 5. ALCANCE LÍQUIDO ---
+    y_alcance = y_bottom + 6
+    pdf.text(107, y_alcance, "ALCANCE LIQUIDO")
+    right_text(pdf, 195, y_alcance, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
     
-    pdf.text(142, y_l + 13, "TOTAL A PAGAR")
-    right_text(pdf, 198, y_l + 13, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
+    y_alcance += 8
+    pdf.text(107, y_alcance, "TOTAL A PAGAR")
+    right_text(pdf, 195, y_alcance, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
     
-    # 5. TEXTO EN PALABRAS, DECLARACIÓN Y FIRMAS
-    y_text = 205
-    pdf.set_font("Arial", '', 9)
-    pdf.text(10, y_text, "Certifico que he recibido conforme y no tengo cargos ni")
-    pdf.text(10, y_text + 5, "cobro alguno posterior que hacer, por ninguno de los")
-    pdf.text(10, y_text + 10, "conceptos comprometidos en ella.")
+    pdf.line(10, y_alcance + 4, 200, y_alcance + 4)
     
-    pdf.set_font("Arial", 'B', 9)
-    pdf.line(40, y_text + 26, 90, y_text + 26)
-    pdf.text(50, y_text + 30, "FIRMA TRABAJADOR")
-    
+    # --- 6. TEXTO LEGAL EN PALABRAS Y FIRMA ---
+    y_palabras = y_alcance + 12
     pdf.set_font("Arial", '', 9)
     texto_son = num2words(int(datos['Líquido a Pagar'])).upper()
-    pdf.text(10, y_text + 45, f"SON: {texto_son} PESOS")
+    pdf.text(10, y_palabras, f"SON: {texto_son} PESOS")
     
-    pdf.set_font("Arial", '', 8)
-    pdf.text(10, y_text + 55, "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador.")
+    y_palabras += 10
+    disclaimer1 = "Certifico que he recibido conforme y no tengo cargos ni cobro alguno posterior que hacer, por ninguno de los"
+    disclaimer2 = "conceptos comprometidos en ella."
+    pdf.text(10, y_palabras, disclaimer1)
+    pdf.text(10, y_palabras + 4, disclaimer2)
+    
+    # Firmas
+    y_firmas = y_palabras + 25
+    pdf.text(10, y_firmas, "FIRMA TRABAJADOR")
+    
+    y_final = y_firmas + 10
+    disclaimer_final = "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador."
+    pdf.text(10, y_final, disclaimer_final)
     
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
