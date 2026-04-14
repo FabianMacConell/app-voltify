@@ -108,6 +108,7 @@ if 'nomina' not in st.session_state:
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
 
+# GARANTÍA DE RETROCOMPATIBILIDAD
 columnas_obligatorias = ["Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Anticipo"]
 for col in columnas_obligatorias:
     if col not in st.session_state.nomina.columns:
@@ -136,6 +137,7 @@ if 'proyectos_tareas' not in st.session_state:
     df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
 
+# RETROCOMPATIBILIDAD DE FECHAS EN TAREAS
 if 'Fecha_Inicio' not in st.session_state.proyectos_tareas.columns:
     st.session_state.proyectos_tareas['Fecha_Inicio'] = datetime.date.today().strftime('%Y-%m-%d')
 if 'Fecha_Termino' not in st.session_state.proyectos_tareas.columns:
@@ -257,14 +259,16 @@ def right_text(pdf, x, y, text):
     width = pdf.get_string_width(text)
     pdf.text(x - width, y, text)
 
+
 # ==========================================
-# MOTOR PDF
+# MOTOR PDF: LITERAR DEL DOCUMENTO WORD (SIN CAJAS)
 # ==========================================
 def generar_pdf_liquidacion(datos):
     pdf = FPDF(unit='mm', format='A4')
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
+    # 1. ENCABEZADO SUPERIOR
     pdf.set_font("Arial", 'B', 10)
     pdf.text(10, 15, "VOLTIFY SPA")
     pdf.set_font("Arial", '', 9)
@@ -275,6 +279,7 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", 'B', 12)
     pdf.text(70, 40, "Liquidación de Sueldo Mensual")
     
+    # 2. BLOQUE DE INFORMACIÓN DEL TRABAJADOR
     y = 50
     trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
     cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
@@ -287,20 +292,26 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 9)
     pdf.text(10, y, "RUT:")
     pdf.text(25, y, rut_trabajador)
+    
     pdf.text(60, y, "Nombre:")
     pdf.text(75, y, trabajador_limpio)
+    
     pdf.text(145, y, "Fecha Contrato :")
     pdf.text(172, y, "16/03/2026")
     
     y += 6
     pdf.text(10, y, "Año:")
     pdf.text(20, y, str(anio_actual))
+    
     pdf.text(35, y, "Mes:")
     pdf.text(45, y, mes_actual)
+    
     pdf.text(65, y, "CC:")
     pdf.text(75, y, "OPERACIONES")
+    
     pdf.text(110, y, "Sueldo Base:")
     pdf.text(130, y, formato_clp(datos["Sueldo Base"]).replace("$","").strip())
+    
     pdf.text(155, y, "UF:")
     pdf.text(165, y, "39.841,72")
     
@@ -308,6 +319,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(10, y, "Cargo:")
     pdf.text(25, y, cargo_limpio)
 
+    # 3. TÍTULOS DE COLUMNAS
     y += 10
     pdf.set_font("Arial", 'B', 9)
     pdf.text(10, y, "HABERES")
@@ -317,7 +329,7 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 9)
     y_start_cols = y
 
-    # --- Columna Izquierda ---
+    # --- COLUMNA IZQUIERDA (HABERES) ---
     y_l = y_start_cols
     dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
     pdf.text(10, y_l, f"Días Trabajados: {dias_trabajados},00")
@@ -357,7 +369,7 @@ def generar_pdf_liquidacion(datos):
     right_text(pdf, 95, y_l, formato_clp(datos["Total Haberes"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
 
-    # --- Columna Derecha ---
+    # --- COLUMNA DERECHA (DESCUENTOS) ---
     y_r = y_start_cols
     afp_nombre = datos["Nombre AFP"].split('(')[0].strip().upper()
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
@@ -423,6 +435,7 @@ def generar_pdf_liquidacion(datos):
         pdf.text(130, y_r, "Anticipo:")
         right_text(pdf, 195, y_r, formato_clp(datos["Anticipo"]).replace("$","").strip())
 
+    # --- 4. TOTALES FINALES ---
     y_tot = max(y_l, y_r) + 15
     pdf.set_font("Arial", 'B', 9)
     
@@ -437,6 +450,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(110, y_tot, "TOTAL A PAGAR")
     right_text(pdf, 195, y_tot, formato_clp(datos["Total a Pagar"]).replace("$","").strip())
     
+    # --- 5. TEXTO EN PALABRAS Y LEGAL ---
     y_words = y_tot + 10
     pdf.set_font("Arial", '', 9)
     texto_son = num2words(int(datos['Total a Pagar'])).upper()
@@ -500,9 +514,9 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (ACTUALIZADA: INICIO)
+# 5. NAVEGACIÓN SUPERIOR
 # ==========================================
-if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Inicio"
+if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
 col_logo, col_espacio, col_settings = st.columns([3, 7, 2], vertical_alignment="bottom")
 
@@ -529,10 +543,8 @@ with col_settings:
 
 st.write("") 
 
-# Añadimos el botón "Inicio" a la botonera
-b0, b1, b2, b3, b4, b5, b6 = st.columns(7)
+b1, b2, b3, b4, b5, b6 = st.columns(6)
 
-if b0.button("🏠 Inicio", type="primary" if st.session_state.menu_actual == "Inicio" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inicio"; st.rerun()
 if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
 if b2.button("📝 Presup.", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
 if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
@@ -543,53 +555,6 @@ if b6.button("📊 Balance", type="primary" if st.session_state.menu_actual == "
 st.divider()
 
 # ==========================================
-# PANTALLA 0: HOME DASHBOARD
-# ==========================================
-if st.session_state.menu_actual == "Inicio":
-    st.markdown("## 📊 Panel de Control General")
-    st.caption("Visión global del estado de Voltify SpA.")
-    
-    # Cálculos rápidos
-    total_trabajadores = len(st.session_state.nomina)
-    
-    presupuestos_pendientes = st.session_state.presupuestos[st.session_state.presupuestos['Aprobacion'] == '⏳ Pendiente']['Monto'].sum()
-    if pd.isna(presupuestos_pendientes): presupuestos_pendientes = 0
-        
-    proyectos_activos = len(st.session_state.proyectos_resumen)
-    
-    colA, colB, colC = st.columns(3)
-    with colA:
-        with st.container(border=True):
-            st.metric("👥 Trabajadores Activos", total_trabajadores)
-    with colB:
-        with st.container(border=True):
-            st.metric("🏗️ Proyectos en Curso", proyectos_activos)
-    with colC:
-        with st.container(border=True):
-            st.metric("⏳ Presupuestos Pendientes", formato_clp(presupuestos_pendientes))
-
-    st.write("")
-    col_izq, col_der = st.columns(2)
-    
-    with col_izq:
-        with st.container(border=True):
-            st.markdown("#### 🚨 Tareas Urgentes (Operaciones)")
-            tareas_urgentes = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas['Estado'].isin(['🔴 Pendiente', '🟡 En proceso'])]
-            if tareas_urgentes.empty:
-                st.success("¡Todo al día! No hay tareas pendientes.")
-            else:
-                st.dataframe(tareas_urgentes[['Proyecto', 'Tarea', 'Estado']], hide_index=True, use_container_width=True)
-
-    with col_der:
-        with st.container(border=True):
-            st.markdown("#### 🛠️ Alertas de Inventario")
-            inventario_alerta = st.session_state.inventario[st.session_state.inventario['Estado'].isin(['🛠️ En Reparación', '❌ Extraviado'])]
-            if inventario_alerta.empty:
-                st.success("Inventario 100% operativo.")
-            else:
-                st.dataframe(inventario_alerta[['Artículo', 'Estado']], hide_index=True, use_container_width=True)
-
-# ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
 def limpiar_form_nomina():
@@ -598,7 +563,7 @@ def limpiar_form_nomina():
 if 'form_id_nomina' not in st.session_state:
     st.session_state.form_id_nomina = 0
 
-elif st.session_state.menu_actual == "Finanzas":
+if st.session_state.menu_actual == "Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
     if st.session_state.acceso_finanzas == "ninguno":
         with st.container(border=True):
@@ -806,8 +771,7 @@ elif st.session_state.menu_actual == "Presupuestos":
             fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY")
             
             colP5, colP6, colP7 = st.columns(3)
-            # SEMÁFOROS APLICADOS
-            aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada"])
+            aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["Pendiente", "Aprobada", "No Aprobada"])
             orden_pres = colP6.selectbox("Respaldo de Orden:", ["Sin Orden", "Con Orden"])
             num_oc_pres = colP7.text_input("N° OC (Si aplica):", placeholder="Ej: OC-1234")
             if not num_oc_pres: num_oc_pres = "N/A"
@@ -818,7 +782,7 @@ elif st.session_state.menu_actual == "Presupuestos":
                     nuevo_presupuesto = pd.DataFrame([{
                         "Tipo": tipo_pres, "Referencia": ref_pres, "Cliente": cliente_pres,
                         "Monto": monto_pres, "Aprobacion": aprobacion_pres, "Orden_Compra": orden_pres,
-                        "Num_OC": num_oc_pres, "Estado_Comercial": "📝 Presupuestada", "Fecha_Emision": str_fecha
+                        "Num_OC": num_oc_pres, "Estado_Comercial": "Presupuestada", "Fecha_Emision": str_fecha
                     }])
                     st.session_state.presupuestos = pd.concat([st.session_state.presupuestos, nuevo_presupuesto], ignore_index=True)
                     guardar_datos("Presupuestos", st.session_state.presupuestos)
@@ -833,8 +797,8 @@ elif st.session_state.menu_actual == "Presupuestos":
         if st.session_state.presupuestos.empty:
             st.info("Aún no hay cotizaciones emitidas en el sistema.")
         else:
-            opciones_estado = ["📝 Presupuestada", "🎯 Adjudicada", "🚀 En progreso", "📦 Entregada", "💳 Pagada"]
-            opciones_aprobacion = ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada"]
+            opciones_estado = ["Presupuestada", "Adjudicada", "En progreso", "Entregada", "Pagada"]
+            opciones_aprobacion = ["Pendiente", "Aprobada", "No Aprobada"]
             opciones_orden = ["Sin Orden", "Con Orden"]
             
             df_pres_edit = st.data_editor(
@@ -1107,7 +1071,7 @@ elif st.session_state.menu_actual == "Operaciones":
                                 "Proyecto": proyecto_seg, 
                                 "Trabajador": encargado_tarea, 
                                 "Tarea": desc_tarea, 
-                                "Estado": "🔴 Pendiente",
+                                "Estado": "Pendiente",
                                 "Fecha_Inicio": str_ini_t,
                                 "Fecha_Termino": str_fin_t
                             }])
@@ -1123,13 +1087,14 @@ elif st.session_state.menu_actual == "Operaciones":
                 if df_tareas_filtradas.empty:
                     st.info("No hay tareas registradas para este proyecto.")
                 else:
+                    # FIX: Convertimos las fechas string a objetos date reales antes de enviarlos a st.data_editor
                     df_tareas_filtradas['Fecha_Inicio'] = pd.to_datetime(df_tareas_filtradas['Fecha_Inicio'], errors='coerce').dt.date
                     df_tareas_filtradas['Fecha_Termino'] = pd.to_datetime(df_tareas_filtradas['Fecha_Termino'], errors='coerce').dt.date
 
                     df_tareas_editadas = st.data_editor(
                         df_tareas_filtradas,
                         column_config={
-                            "Estado": st.column_config.SelectboxColumn("Estado", options=["🔴 Pendiente", "🟡 En proceso", "🟢 Terminada"]),
+                            "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"]),
                             "Fecha_Inicio": st.column_config.DateColumn("Inicio"),
                             "Fecha_Termino": st.column_config.DateColumn("Fin")
                         },
@@ -1137,6 +1102,7 @@ elif st.session_state.menu_actual == "Operaciones":
                     )
                     
                     if st.button("💾 Guardar Progreso de Tareas", type="primary"):
+                        # Reconvertimos a string para guardarlo seguro en Sheets
                         df_tareas_editadas['Fecha_Inicio'] = df_tareas_editadas['Fecha_Inicio'].astype(str)
                         df_tareas_editadas['Fecha_Termino'] = df_tareas_editadas['Fecha_Termino'].astype(str)
                         
@@ -1158,7 +1124,7 @@ elif st.session_state.menu_actual == "Operaciones":
                             x2=alt.X2('Fecha_Termino:T'),
                             y=alt.Y('Tarea:N', sort=alt.EncodingSortField(field='Fecha_Inicio', order='ascending'), title=''),
                             color=alt.Color('Estado:N', scale=alt.Scale(
-                                domain=['🔴 Pendiente', '🟡 En proceso', '🟢 Terminada'], 
+                                domain=['Pendiente', 'En proceso', 'Terminada'], 
                                 range=['#ef4444', '#eab308', '#22c55e']
                             )),
                             tooltip=['Tarea', 'Trabajador', 'Estado', 'Fecha_Inicio', 'Fecha_Termino']
@@ -1199,7 +1165,7 @@ elif st.session_state.menu_actual == "Inventario":
             if st.button("Guardar en Inventario", type="primary"):
                 if nuevo_art:
                     nuevo_serie = f"VLT-{uuid.uuid4().hex[:6].upper()}"
-                    nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": nueva_cant, "Nro_Serie": nuevo_serie, "Estado": "🟢 Disponible"}])
+                    nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": nueva_cant, "Nro_Serie": nuevo_serie, "Estado": "Disponible"}])
                     st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
                     guardar_datos("Inventario", st.session_state.inventario)
                     st.success(f"✅ Artículo añadido con éxito. **N° de Serie: {nuevo_serie}**")
@@ -1232,7 +1198,7 @@ elif st.session_state.menu_actual == "Inventario":
                 st.session_state.inventario,
                 column_config={
                     "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0),
-                    "Estado": st.column_config.SelectboxColumn("Estado", options=["🟢 Disponible", "🟡 En Uso", "🛠️ En Reparación", "❌ Extraviado"]),
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Disponible", "En Uso", "En Reparación", "Extraviado"]),
                     "Nro_Serie": st.column_config.TextColumn("N° de Serie (Automático)")
                 },
                 disabled=["Artículo", "Nro_Serie"], hide_index=True, use_container_width=True, key="ed_inv"
