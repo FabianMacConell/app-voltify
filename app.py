@@ -70,8 +70,7 @@ def guardar_datos(nombre_hoja, df):
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
         
-        # Añadido RUT a columnas string para evitar errores de formato en Sheets
-        columnas_str = ['RUT', 'Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
+        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
         for col in columnas_str:
             if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
             
@@ -191,7 +190,6 @@ def calcular_liquidaciones(df):
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
         
-        # El RUT viaja invisible hasta el generador de PDF
         resultados.append({
             "RUT": str(row.get('RUT', 'Sin Registro')),
             "Trabajador": row['Trabajador'], "Cargo": row['Cargo'], "Contrato": tipo_contrato,
@@ -228,10 +226,6 @@ def num2words(n):
         return "UN MILLON " + num2words(n % 1000000)
     return num2words(n // 1000000) + " MILLONES " + num2words(n % 1000000)
 
-
-# ==========================================
-# MOTOR DE COORDENADAS PARA EL PDF
-# ==========================================
 def right_text(pdf, x, y, text):
     width = pdf.get_string_width(text)
     pdf.text(x - width, y, text)
@@ -263,7 +257,7 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, 35, "RUT:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(25, 35, rut_trabajador) # RUT INYECTADO AQUÍ
+    pdf.text(25, 35, rut_trabajador)
     
     pdf.set_font("Arial", 'B', 9)
     pdf.text(60, 35, "Nombre:")
@@ -537,6 +531,31 @@ st.divider()
 # ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
+
+# Funciones de limpieza de formulario
+def limpiar_form_nomina():
+    st.session_state['n_rut_key'] = ""
+    st.session_state['n_trabajador_key'] = ""
+    st.session_state['n_cargo_key'] = ""
+    st.session_state['n_jornada_key'] = 44
+    st.session_state['n_grati_key'] = "Tope Legal Mensual"
+    st.session_state['n_contrato_key'] = "Indefinido"
+    st.session_state['n_afp_key'] = "Habitat (11.27%)"
+    st.session_state['input_sueldo_base'] = "0"
+    st.session_state['input_colacion'] = "0"
+    st.session_state['input_movilizacion'] = "0"
+
+# Inicializar llaves si no existen
+for key in ['n_rut_key', 'n_trabajador_key', 'n_cargo_key']:
+    if key not in st.session_state: st.session_state[key] = ""
+if 'n_jornada_key' not in st.session_state: st.session_state['n_jornada_key'] = 44
+if 'n_grati_key' not in st.session_state: st.session_state['n_grati_key'] = "Tope Legal Mensual"
+if 'n_contrato_key' not in st.session_state: st.session_state['n_contrato_key'] = "Indefinido"
+if 'n_afp_key' not in st.session_state: st.session_state['n_afp_key'] = "Habitat (11.27%)"
+if 'input_sueldo_base' not in st.session_state: st.session_state['input_sueldo_base'] = "0"
+if 'input_colacion' not in st.session_state: st.session_state['input_colacion'] = "0"
+if 'input_movilizacion' not in st.session_state: st.session_state['input_movilizacion'] = "0"
+
 if st.session_state.menu_actual == "Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
     if st.session_state.acceso_finanzas == "ninguno":
@@ -560,51 +579,55 @@ if st.session_state.menu_actual == "Finanzas":
                 st.subheader("Control de Asistencia y Nómina")
                 if st.session_state.acceso_finanzas == "admin":
                     with st.expander("➕ Ingresar Nuevo Trabajador", expanded=False):
-                        # --- NUEVO: Formulario con campo RUT visible al ingresar ---
                         colRUT, colA, colB = st.columns([1, 2, 2])
-                        n_rut = colRUT.text_input("RUT (Ej: 12.345.678-9)")
-                        n_trabajador = colA.text_input("Nombre Completo")
-                        n_cargo = colB.text_input("Cargo")
+                        n_rut = colRUT.text_input("RUT (Ej: 12.345.678-9)", key="n_rut_key")
+                        n_trabajador = colA.text_input("Nombre Completo", key="n_trabajador_key")
+                        n_cargo = colB.text_input("Cargo", key="n_cargo_key")
                         
-                        if 'input_sueldo_base' not in st.session_state: st.session_state['input_sueldo_base'] = "0"
                         colC, colD, colE = st.columns([2, 1, 2])
                         colC.text_input("Sueldo Base Mensual", key="input_sueldo_base", on_change=formatear_input, kwargs={'llave': 'input_sueldo_base'})
                         n_sueldo = float(st.session_state['input_sueldo_base'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-                        n_jornada = colD.number_input("Hrs Semanales", value=44, max_value=45)
-                        n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"])
+                        n_jornada = colD.number_input("Hrs Semanales", value=st.session_state['n_jornada_key'], max_value=45, key="n_jornada_key")
+                        n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"], key="n_grati_key")
                         
                         colF, colG = st.columns(2)
-                        n_contrato = colF.selectbox("Tipo de Contrato", ["Indefinido", "Plazo Fijo"])
-                        n_afp = colG.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
+                        n_contrato = colF.selectbox("Tipo de Contrato", ["Indefinido", "Plazo Fijo"], key="n_contrato_key")
+                        n_afp = colG.selectbox("Seleccione AFP", list(TASAS_AFP.keys()), key="n_afp_key")
                         
                         colH, colI = st.columns(2)
-                        if 'input_colacion' not in st.session_state: st.session_state['input_colacion'] = "0"
-                        if 'input_movilizacion' not in st.session_state: st.session_state['input_movilizacion'] = "0"
                         colH.text_input("Bono Colación (Opcional)", key="input_colacion", on_change=formatear_input, kwargs={'llave': 'input_colacion'})
                         n_cola = float(st.session_state['input_colacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                         colI.text_input("Bono Movilización (Opcional)", key="input_movilizacion", on_change=formatear_input, kwargs={'llave': 'input_movilizacion'})
                         n_movi = float(st.session_state['input_movilizacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                         
-                        if st.button("Guardar Perfil"):
-                            if n_trabajador and n_rut:
-                                nuevo_perfil = pd.DataFrame([{
-                                    "RUT": n_rut, "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
-                                    "Jornada_Hrs": n_jornada, "Tipo_Contrato": n_contrato, "Gratificacion": n_grati, 
-                                    "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
-                                    "Colacion": n_cola, "Movilizacion": n_movi
-                                }])
-                                st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
-                                guardar_datos("Nomina_Personal", st.session_state.nomina)
-                                st.success("Trabajador registrado exitosamente.")
+                        st.write("")
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("💾 Guardar Perfil", type="primary", use_container_width=True):
+                                if n_trabajador and n_rut:
+                                    nuevo_perfil = pd.DataFrame([{
+                                        "RUT": n_rut, "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
+                                        "Jornada_Hrs": n_jornada, "Tipo_Contrato": n_contrato, "Gratificacion": n_grati, 
+                                        "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
+                                        "Colacion": n_cola, "Movilizacion": n_movi
+                                    }])
+                                    st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
+                                    guardar_datos("Nomina_Personal", st.session_state.nomina)
+                                    limpiar_form_nomina() # Vaciado automático
+                                    st.success("Trabajador registrado exitosamente.")
+                                    st.rerun()
+                                else:
+                                    st.error("⚠️ El RUT y el Nombre Completo son obligatorios.")
+                        with col_btn2:
+                            if st.button("🧹 Limpiar Campos", use_container_width=True):
+                                limpiar_form_nomina()
                                 st.rerun()
-                            else:
-                                st.error("El RUT y el Nombre son obligatorios.")
 
                     st.caption("Modifique datos interactivos directamente en la tabla:")
                     df_nomina_edit = st.data_editor(
                         st.session_state.nomina,
                         column_config={
-                            "RUT": None, # <--- ESTA ES LA MAGIA: El RUT existe pero es 100% invisible en la tabla.
+                            "RUT": None, # El RUT es invisible para el usuario en esta vista general
                             "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, format="%,d"),
                             "Colacion": st.column_config.NumberColumn("Colación", min_value=0, format="%,d"),
                             "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, format="%,d"),
@@ -618,15 +641,24 @@ if st.session_state.menu_actual == "Finanzas":
                         st.session_state.nomina = df_nomina_edit
                         guardar_datos("Nomina_Personal", st.session_state.nomina)
                         st.success("Nómina actualizada.")
+                        
+                    # --- NUEVO: MÓDULO PARA DAR DE BAJA ---
+                    with st.expander("🗑️ Dar de Baja / Eliminar Trabajador"):
+                        lista_trabajadores = st.session_state.nomina['Trabajador'].tolist()
+                        if lista_trabajadores:
+                            trab_a_borrar = st.selectbox("Selecciona el trabajador a eliminar:", lista_trabajadores)
+                            if st.button("Eliminar Definitivamente", type="primary"):
+                                st.session_state.nomina = st.session_state.nomina[st.session_state.nomina['Trabajador'] != trab_a_borrar].reset_index(drop=True)
+                                guardar_datos("Nomina_Personal", st.session_state.nomina)
+                                st.success(f"Trabajador {trab_a_borrar} dado de baja exitosamente.")
+                                st.rerun()
                 else:
-                    # En modo lectura, aseguramos también ocultar el RUT para seguridad
                     st.dataframe(st.session_state.nomina.drop(columns=["RUT"], errors='ignore'), use_container_width=True)
 
             with st.container(border=True):
                 st.subheader("Proyección de Liquidaciones")
                 df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
                 
-                # Vista resumen (sin mostrar RUT)
                 df_liq_visual = df_liquidaciones[["Trabajador", "Cargo", "Contrato", "Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]].copy()
                 for col in ["Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
                     df_liq_visual[col] = df_liq_visual[col].apply(formato_clp)
@@ -640,7 +672,7 @@ if st.session_state.menu_actual == "Finanzas":
                     trab_lista = df_liquidaciones['Trabajador'].tolist()
                     if trab_lista:
                         col_sel, col_btn = st.columns([3, 1], vertical_alignment="bottom")
-                        trab_seleccionado = col_sel.selectbox("Seleccione un trabajador:", trab_lista)
+                        trab_seleccionado = col_sel.selectbox("Seleccione un trabajador para generar documento:", trab_lista)
                         datos_trabajador_pdf = df_liquidaciones[df_liquidaciones['Trabajador'] == trab_seleccionado].iloc[0]
                         pdf_generado_bytes = generar_pdf_liquidacion(datos_trabajador_pdf)
                         col_btn.download_button(
