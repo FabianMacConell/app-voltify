@@ -203,7 +203,6 @@ def calcular_liquidaciones(df):
         })
     return pd.DataFrame(resultados), costo_empresa_total
 
-# Algoritmo conversor de números a palabras corregido (Sin el "CERO" al final)
 def num2words(n):
     if n == 0: return "CERO"
     unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE", "VEINTE", "VEINTIUN", "VEINTIDOS", "VEINTITRES", "VEINTICUATRO", "VEINTICINCO", "VEINTISEIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE"]
@@ -225,8 +224,9 @@ def num2words(n):
         return "UN MILLON " + num2words(n % 1000000)
     return num2words(n // 1000000) + " MILLONES" + (" " + num2words(n % 1000000) if n % 1000000 != 0 else "")
 
+
 # ==========================================
-# MOTOR DE COORDENADAS: CLON EXACTO DEL FORMATO WORD
+# MOTOR DE COORDENADAS: GRILLAS Y CELDAS
 # ==========================================
 def right_text(pdf, x, y, text):
     """Alinea textos perfectamente a la derecha"""
@@ -239,223 +239,223 @@ def generar_pdf_liquidacion(datos):
     pdf.set_auto_page_break(auto=False)
     
     # --- 1. ENCABEZADO SUPERIOR IZQUIERDO ---
-    pdf.set_font("Arial", 'B', 10)
+    pdf.set_font("Arial", 'B', 11)
     pdf.text(10, 15, "VOLTIFY SPA")
     pdf.set_font("Arial", '', 9)
-    pdf.text(10, 20, "RUT : 77.871.702-6 JAVIERA CARRERA #1150 ARICA")
-    pdf.text(10, 25, "Teléfono Cel 995635899")
+    pdf.text(10, 20, "RUT : 77.871.702-6")
+    pdf.text(10, 25, "JAVIERA CARRERA #1150 ARICA")
+    pdf.text(10, 30, "Teléfono Cel 995635899")
     
-    # --- 2. TÍTULO CENTRAL ---
-    pdf.set_font("Arial", 'B', 12)
-    pdf.set_xy(10, 30)
-    pdf.cell(190, 6, "Liquidación de Sueldo Mensual", align='C')
+    # --- 2. RECUADRO SUPERIOR DERECHO (Datos Contrato con Caja) ---
+    pdf.rect(120, 10, 80, 42)
+    dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
+    afp_nombre = datos["Nombre AFP"].split('(')[0].strip().upper()
     
-    # --- 3. DATOS DEL TRABAJADOR ---
-    y_info = 45
-    trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
-    rut_trabajador = datos.get("RUT", "11.111.111-1")
+    y_c = 15
+    pdf.text(122, y_c, "Días Trabajados")
+    right_text(pdf, 198, y_c, f"{dias_trabajados},00")
     
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(10, y_info, "RUT:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(25, y_info, rut_trabajador)
+    y_c += 6
+    pdf.text(122, y_c, "AFP")
+    right_text(pdf, 198, y_c, f"AFP {afp_nombre} S.A.")
     
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(55, y_info, "Nombre:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(75, y_info, trabajador_limpio)
+    y_c += 6
+    pdf.text(122, y_c, "Días Licencia")
+    right_text(pdf, 198, y_c, "0,00")
     
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(150, y_info, "Fecha Contrato:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(178, y_info, "16/03/2026") # Ajustable
+    y_c += 6
+    pdf.text(122, y_c, "Horas Extras")
+    right_text(pdf, 198, y_c, "0,0")
     
-    y_info += 6
-    meses_str = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+    y_c += 6
+    pdf.text(122, y_c, "Fecha Contrato")
+    right_text(pdf, 198, y_c, "16-03-2026")
+    
+    y_c += 6
+    pdf.text(122, y_c, "Centro Costo")
+    right_text(pdf, 198, y_c, "OPERACIONES")
+    
+    y_c += 6
+    pdf.text(122, y_c, "Seguro Cesantía")
+    right_text(pdf, 198, y_c, "SI" if datos["Dcto Cesantia"] > 0 else "NO")
+
+    # --- 3. TÍTULO CENTRAL ---
+    meses_str = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
     mes_actual = meses_str[datetime.datetime.now().month - 1]
     anio_actual = datetime.datetime.now().year
     
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(10, y_info, "Año:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(20, y_info, str(anio_actual))
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_xy(10, 56)
+    pdf.cell(190, 6, f"Liquidación de Remuneraciones de {mes_actual} de {anio_actual}", align='C')
     
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(35, y_info, "Mes:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(45, y_info, mes_actual)
+    # --- 4. RECUADRO DATOS DEL TRABAJADOR (Con rejilla interior) ---
+    pdf.rect(10, 66, 190, 24)
+    pdf.line(10, 74, 200, 74) # Divisor horizontal 1
+    pdf.line(10, 82, 200, 82) # Divisor horizontal 2
     
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(75, y_info, "CC:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(85, y_info, "OPERACIONES")
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(120, y_info, "Sueldo Base:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(145, y_info, formato_clp(datos["Sueldo Base"]).replace("$","").strip())
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(170, y_info, "UF:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(180, y_info, "39.841,72")
-    
-    y_info += 6
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(10, y_info, "Cargo:")
-    pdf.set_font("Arial", '', 9)
-    cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
-    pdf.text(25, y_info, cargo_limpio)
-    
-    # --- 4. TABLA DE HABERES Y DESCUENTOS (Sin Borde Exterior según DOCX) ---
-    y_table = 65
-    pdf.set_font("Arial", 'B', 10)
-    
-    # Caja central superior
-    pdf.rect(10, y_table, 190, 6)
-    pdf.line(105, y_table, 105, y_table+6)
-    pdf.text(45, y_table + 4, "HABERES")
-    pdf.text(140, y_table + 4, "DESCUENTOS")
-    
-    y_h = y_table + 10
-    y_d = y_table + 10
-    
-    pdf.set_font("Arial", '', 9)
-    
-    # --- COLUMNA IZQUIERDA (HABERES) ---
-    dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
-    sueldo_prop = datos["Sueldo Base"] / 30 * dias_trabajados
-    
-    pdf.text(12, y_h, f"Días Trabajados: {dias_trabajados},00")
-    y_h += 6
-    
-    pdf.text(12, y_h, "Sueldo:")
-    right_text(pdf, 100, y_h, formato_clp(sueldo_prop).replace("$","").strip())
-    y_h += 6
-    
-    pdf.text(12, y_h, "Horas : 0.0     50.00%") # Datos estáticos maqueta
-    y_h += 6
-    pdf.text(12, y_h, "Total Horas Extras:")
-    right_text(pdf, 100, y_h, formato_clp(datos["Horas Extras"]).replace("$","").strip())
-    y_h += 6
-    
-    pdf.text(12, y_h, "Gratificación:")
-    right_text(pdf, 100, y_h, formato_clp(datos["Gratificacion"]).replace("$","").strip())
-    y_h += 8
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(12, y_h, "Total Imponible:")
-    right_text(pdf, 100, y_h, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
-    pdf.set_font("Arial", '', 9)
-    y_h += 8
-    
-    pdf.text(12, y_h, "Cargas:")
-    y_h += 6
-    
-    pdf.text(12, y_h, "Asignación Movilización:")
-    right_text(pdf, 100, y_h, formato_clp(datos["Movilizacion"]).replace("$","").strip())
-    y_h += 6
-    
-    pdf.text(12, y_h, "Asignación Colación:")
-    right_text(pdf, 100, y_h, formato_clp(datos["Colacion"]).replace("$","").strip())
-    y_h += 8
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(12, y_h, "TOTAL HABERES:")
-    right_text(pdf, 100, y_h, formato_clp(datos["Total Haberes"]).replace("$","").strip())
-    pdf.set_font("Arial", '', 9)
-    
-    # --- COLUMNA DERECHA (DESCUENTOS) ---
-    afp_nombre = datos["Nombre AFP"].split('(')[0].strip()
+    trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
+    rut_trabajador = datos.get("RUT", "11.111.111-1")
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
     
-    pdf.text(107, y_d, f"AFP: {afp_nombre}")
-    pdf.text(145, y_d, "Base AFP:")
-    right_text(pdf, 195, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
-    y_d += 6
+    # Fila 1 de trabajador
+    y_i = 71
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(12, y_i, "RUT:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(25, y_i, rut_trabajador)
     
-    pdf.text(145, y_d, "Cotización AFP:")
-    right_text(pdf, 195, y_d, formato_clp(datos["Dcto AFP"]).replace("$","").strip())
-    y_d += 6
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(60, y_i, "Nombre:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(75, y_i, trabajador_limpio)
     
-    pdf.text(107, y_d, "Isapre: Fonasa")
-    y_d += 6
-    pdf.text(107, y_d, "7% Obligatorio:")
-    right_text(pdf, 195, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip())
-    y_d += 6
+    # Fila 2 de trabajador
+    y_i += 8
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(12, y_i, "Año:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(25, y_i, str(anio_actual))
     
-    pdf.text(107, y_d, "Cotización Pactado:")
-    pdf.text(145, y_d, "0 UF")
-    right_text(pdf, 195, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip()) # Según PDF, repite valor
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(45, y_i, "Mes:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(55, y_i, mes_actual)
+    
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(90, y_i, "Sueldo Base:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(115, y_i, formato_clp(datos["Sueldo Base"]).replace("$","").strip())
+    
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(150, y_i, "Isapre:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(165, y_i, "FONASA")
+    
+    # Fila 3 de trabajador
+    y_i += 8
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(12, y_i, "Cargo:")
+    pdf.set_font("Arial", '', 9)
+    cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
+    pdf.text(25, y_i, cargo_limpio)
+    
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(90, y_i, "Tipo Contrato:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(115, y_i, str(datos['Contrato']).upper())
+    
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(150, y_i, "% AFP:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(165, y_i, afp_tasa)
+
+    # --- 5. TABLA DE HABERES Y DESCUENTOS CON CELDAS Y LÍNEAS ---
+    y_t = 95
+    pdf.rect(10, y_t, 190, 80) # Caja principal
+    pdf.line(105, y_t, 105, y_t + 80) # Línea divisoria central
+    pdf.line(10, y_t + 7, 200, y_t + 7) # Línea debajo de los Títulos HABERES/DESCUENTOS
+    
+    # Líneas separadoras internas para los "Subtotales" Imponibles y de Previsión
+    pdf.line(10, y_t + 40, 200, y_t + 40)
+    pdf.line(10, y_t + 47, 200, y_t + 47)
+    
+    # Textos de Cabecera
+    pdf.set_font("Arial", 'B', 10)
+    pdf.text(45, y_t + 5, "HABERES")
+    pdf.text(140, y_t + 5, "DESCUENTOS")
+    
+    pdf.set_font("Arial", '', 9)
+    # -- Columna Izquierda (Haberes) --
+    y_h = y_t + 12
+    sueldo_prop = datos["Sueldo Base"] / 30 * dias_trabajados
+    pdf.text(12, y_h, "SUELDO BASE")
+    right_text(pdf, 102, y_h, formato_clp(sueldo_prop).replace("$","").strip())
+    
+    y_h += 6
+    pdf.text(12, y_h, "GRATIFICACION")
+    right_text(pdf, 102, y_h, formato_clp(datos["Gratificacion"]).replace("$","").strip())
+    
+    if datos["Horas Extras"] > 0:
+        y_h += 6
+        pdf.text(12, y_h, "BONO HORAS EXTRAS")
+        right_text(pdf, 102, y_h, formato_clp(datos["Horas Extras"]).replace("$","").strip())
+    
+    # Subtotal Haberes Imponibles
+    y_sub = y_t + 45
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(12, y_sub, "TOTAL IMPONIBLE")
+    right_text(pdf, 102, y_sub, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
+    
+    pdf.set_font("Arial", '', 9)
+    y_h = y_t + 52
+    if datos["Colacion"] > 0:
+        pdf.text(12, y_h, "ASIGNACION COLACION")
+        right_text(pdf, 102, y_h, formato_clp(datos["Colacion"]).replace("$","").strip())
+        y_h += 6
+    if datos["Movilizacion"] > 0:
+        pdf.text(12, y_h, "ASIGNACION MOVILIZACION")
+        right_text(pdf, 102, y_h, formato_clp(datos["Movilizacion"]).replace("$","").strip())
+
+    # -- Columna Derecha (Descuentos) --
+    y_d = y_t + 12
+    pdf.text(107, y_d, "A.F.P.")
+    right_text(pdf, 198, y_d, formato_clp(datos["Dcto AFP"]).replace("$","").strip())
+    
     y_d += 6
+    pdf.text(107, y_d, f"SALUD 7% s/{int(datos['Imponible Calculado'])}")
+    right_text(pdf, 198, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip())
     
     if datos["Dcto Cesantia"] > 0:
-        pdf.text(107, y_d, "Base AFC:")
-        right_text(pdf, 195, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
         y_d += 6
-        pdf.text(107, y_d, "Cotización AFC Trabajador:")
-        right_text(pdf, 195, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
-        y_d += 6
+        pdf.text(107, y_d, "SEGURO CESANTIA")
+        right_text(pdf, 198, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
 
+    # Subtotal Previsión
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(107, y_d, "Total Previsión:")
-    right_text(pdf, 195, y_d, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
+    pdf.text(107, y_sub, "TOTAL PREVISION")
+    right_text(pdf, 198, y_sub, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
+    
     pdf.set_font("Arial", '', 9)
-    y_d += 8
-    
-    pdf.text(107, y_d, "Días no Trabajados")
+    y_d = y_t + 52
+    pdf.text(107, y_d, "Días No Trabajados")
     y_d += 6
-    pdf.text(107, y_d, "Licencia:")
-    y_d += 6
-    pdf.text(107, y_d, "Faltas:")
-    pdf.text(130, y_d, str(int(datos.get("Dias_Falta", 0))))
-    y_d += 8
+    pdf.text(107, y_d, "Faltas / Inasistencias:")
+    right_text(pdf, 198, y_d, str(int(datos.get("Dias_Falta", 0))))
     
-    pdf.text(145, y_d, "Base Tributable:")
-    base_trib = datos["Imponible Calculado"] - datos["Descuentos Ley"]
-    if base_trib < 0: base_trib = 0
-    right_text(pdf, 195, y_d, formato_clp(base_trib).replace("$","").strip())
-    y_d += 14 # Ajuste para igualar línea de "Total Descuento"
+    # --- 6. CELDAS INFERIORES DE TOTALES (Pegadas a la tabla principal) ---
+    pdf.rect(10, 175, 190, 8) # Celda horizontal de totales
+    pdf.line(105, 175, 105, 183) # Línea divisoria en el medio
+    pdf.set_font("Arial", 'B', 10)
     
-    # Totales Descuento
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(107, y_d, "TOTAL DESCUENTO")
-    right_text(pdf, 195, y_d, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
+    pdf.text(12, 180, "TOTAL HABERES")
+    right_text(pdf, 102, 180, formato_clp(datos["Total Haberes"]).replace("$","").strip())
     
-    # Línea separadora final de totales
-    y_bottom = max(y_h, y_d) + 5
-    pdf.line(10, y_bottom, 200, y_bottom)
+    pdf.text(107, 180, "TOTAL DESCUENTOS")
+    right_text(pdf, 198, 180, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
     
-    # --- 5. ALCANCE LÍQUIDO ---
-    y_alcance = y_bottom + 6
-    pdf.text(107, y_alcance, "ALCANCE LIQUIDO")
-    right_text(pdf, 195, y_alcance, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
+    # --- 7. CAJA DE ALCANCE LÍQUIDO A LA DERECHA ---
+    pdf.rect(120, 186, 80, 14)
+    pdf.line(120, 193, 200, 193) # Divisor entre Líquido y Total a Pagar
     
-    y_alcance += 8
-    pdf.text(107, y_alcance, "TOTAL A PAGAR")
-    right_text(pdf, 195, y_alcance, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
+    pdf.set_font("Arial", 'B', 11)
+    pdf.text(122, 191, "ALCANCE LIQUIDO")
+    right_text(pdf, 198, 191, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
     
-    pdf.line(10, y_alcance + 4, 200, y_alcance + 4)
+    pdf.text(122, 198, "TOTAL A PAGAR")
+    right_text(pdf, 198, 198, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
     
-    # --- 6. TEXTO LEGAL EN PALABRAS Y FIRMA ---
-    y_palabras = y_alcance + 12
-    pdf.set_font("Arial", '', 9)
+    # --- 8. TEXTO EN PALABRAS Y FIRMA ---
+    y_p = 210
     texto_son = num2words(int(datos['Líquido a Pagar'])).upper()
-    pdf.text(10, y_palabras, f"SON: {texto_son} PESOS")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(10, y_p, "Certifico que he recibido de VOLTIFY SPA.")
+    pdf.text(10, y_p + 5, f"a entera satisfacción la suma de {texto_son} PESOS, y no tengo cargo")
+    pdf.text(10, y_p + 10, "ni cobro alguno posterior que hacer por ninguno de los conceptos comprendidos en ella.")
     
-    y_palabras += 10
-    disclaimer1 = "Certifico que he recibido conforme y no tengo cargos ni cobro alguno posterior que hacer, por ninguno de los"
-    disclaimer2 = "conceptos comprometidos en ella."
-    pdf.text(10, y_palabras, disclaimer1)
-    pdf.text(10, y_palabras + 4, disclaimer2)
-    
-    # Firmas
-    y_firmas = y_palabras + 25
-    pdf.text(10, y_firmas, "FIRMA TRABAJADOR")
-    
-    y_final = y_firmas + 10
-    disclaimer_final = "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador."
-    pdf.text(10, y_final, disclaimer_final)
+    y_f = 250
+    pdf.text(80, y_f, "_______________________________________")
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(105, y_f + 5, "Recibi Conforme")
     
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
@@ -862,6 +862,7 @@ elif st.session_state.menu_actual == "Proyectos":
             if st.session_state.acceso_proyectos == "admin":
                 with st.container(border=True):
                     with st.expander("💸 Asignar Personal y Cargar al Gasto (Vínculo a Operaciones)", expanded=False):
+                        st.info("💡 Al asignarle presupuesto a un trabajador aquí, lo autorizas automáticamente para ser parte del equipo en la pestaña de 'Operaciones'.")
                         df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
                         trabajadores = ["Seleccione..."] + df_liq["Trabajador"].tolist()
                         colT1, colT2, colT3 = st.columns([2, 1, 1])
@@ -1115,7 +1116,7 @@ elif st.session_state.menu_actual == "Inventario":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 6: BALANCE TOTAL (MEJORADO CON SELECTOR INTERNO)
+# PANTALLA 6: BALANCE TOTAL
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
     
