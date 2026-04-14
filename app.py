@@ -189,49 +189,154 @@ def calcular_liquidaciones(df):
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
         
+        # Agregamos TODOS los detalles al diccionario para usarlos en el PDF oficial
         resultados.append({
             "Trabajador": row['Trabajador'], "Cargo": row['Cargo'], "Contrato": tipo_contrato,
+            "Sueldo Base": sueldo_base, "Horas Extras": pago_extras, "Gratificacion": grati_monto,
+            "Colacion": colacion, "Movilizacion": movilizacion, 
+            "Nombre AFP": row.get('AFP', 'Habitat (11.27%)'), "Dcto AFP": dcto_afp,
+            "Dcto Fonasa": dcto_fonasa, "Dcto Cesantia": dcto_cesantia,
             "Imponible Calculado": sueldo_imponible, "Haberes No Imponibles": no_imponibles, 
+            "Total Haberes": sueldo_imponible + no_imponibles,
             "Descuentos Ley": dcto_afp + dcto_fonasa + dcto_cesantia,
             "Líquido a Pagar": sueldo_liquido, "Costo Empresa": costo_real_empresa
         })
     return pd.DataFrame(resultados), costo_empresa_total
 
+# Algoritmo conversor de números a palabras para cheques y liquidaciones
+def num2words(n):
+    unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE", "VEINTE", "VEINTIUN", "VEINTIDOS", "VEINTITRES", "VEINTICUATRO", "VEINTICINCO", "VEINTISEIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE"]
+    decenas = ["", "DIEZ", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
+    centenas = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
+
+    if n == 0: return "CERO"
+    if n == 100: return "CIEN"
+    if n < 30: return unidades[n]
+    if n < 100:
+        if n % 10 == 0: return decenas[n // 10]
+        else: return decenas[n // 10] + " Y " + unidades[n % 10]
+    if n < 1000:
+        if n % 100 == 0: return centenas[n // 100]
+        else: return centenas[n // 100] + " " + num2words(n % 100)
+    if n < 2000: return "MIL " + num2words(n % 1000)
+    if n < 1000000: return num2words(n // 1000) + " MIL " + num2words(n % 1000)
+    if n == 1000000: return "UN MILLON"
+    if n < 2000000: return "UN MILLON " + num2words(n % 1000000)
+    return num2words(n // 1000000) + " MILLONES " + num2words(n % 1000000)
+
 def generar_pdf_liquidacion(datos):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "LIQUIDACION DE SUELDO", ln=True, align='C')
+    
+    # --- ENCABEZADO CORPORATIVO (Basado en el formato oficial) ---
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 5, "VOLTIFY SPA", ln=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 5, "RUT: 77.871.702-6", ln=True)
+    pdf.cell(0, 5, "JAVIERA CARRERA #1150 ARICA", ln=True)
+    pdf.cell(0, 5, "Teléfono Cel: +56 9 95635899", ln=True)
+    
     pdf.ln(5)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 8, "EMPRESA: VOLTIFY SpA", ln=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(0, 8, "Giro: Servicios de Ingenieria", ln=True)
-    pdf.ln(5)
-    pdf.set_font("Arial", 'B', 12)
-    trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1')
-    pdf.cell(0, 8, f"TRABAJADOR: {trabajador_limpio}", ln=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(0, 8, f"Cargo: {datos['Cargo']}", ln=True)
-    pdf.cell(0, 8, f"Tipo de Contrato: {datos['Contrato']}", ln=True)
-    pdf.ln(10)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(95, 10, "HABERES E IMPONIBLES", border=1, align='C')
-    pdf.cell(95, 10, "DESCUENTOS LEGALES", border=1, ln=True, align='C')
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(95, 10, f" Total Imponible: {formato_clp(datos['Imponible Calculado'])}", border=1)
-    pdf.cell(95, 10, f" Descuentos Ley: {formato_clp(datos['Descuentos Ley'])}", border=1, ln=True)
-    pdf.cell(95, 10, f" Haberes No Imponibles: {formato_clp(datos['Haberes No Imponibles'])}", border=1)
-    pdf.cell(95, 10, f" ", border=1, ln=True)
-    pdf.ln(10)
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 15, f"LIQUIDO A PAGAR: {formato_clp(datos['Líquido a Pagar'])}", border=1, ln=True, align='C')
-    pdf.ln(30)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(95, 10, "__________________________", align='C')
-    pdf.cell(95, 10, "__________________________", align='C', ln=True)
-    pdf.cell(95, 5, "Firma Empleador", align='C')
-    pdf.cell(95, 5, "Firma Trabajador", align='C', ln=True)
+    pdf.cell(0, 8, "Liquidación de Sueldo Mensual", ln=True, align='C')
+    pdf.ln(5)
+    
+    # --- DATOS DEL TRABAJADOR ---
+    pdf.set_font("Arial", '', 10)
+    trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1')
+    cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1')
+    
+    meses_str = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+    mes_actual = meses_str[datetime.datetime.now().month - 1]
+    anio_actual = datetime.datetime.now().year
+    
+    pdf.cell(120, 6, f"Nombre: {trabajador_limpio}", border=0)
+    pdf.cell(0, 6, f"Año: {anio_actual}    Mes: {mes_actual}", border=0, ln=True)
+    pdf.cell(120, 6, f"Cargo: {cargo_limpio}", border=0)
+    pdf.cell(0, 6, f"Contrato: {datos['Contrato']}", border=0, ln=True)
+    pdf.line(10, pdf.get_y()+2, 200, pdf.get_y()+2)
+    pdf.ln(5)
+    
+    # --- CUERPO: HABERES Y DESCUENTOS ---
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(95, 7, "HABERES", border=1, align='C')
+    pdf.cell(95, 7, "DESCUENTOS", border=1, ln=True, align='C')
+    
+    pdf.set_font("Arial", '', 10)
+    
+    haberes_items = [
+        ("Sueldo Base", datos["Sueldo Base"]),
+        ("Horas Extras", datos["Horas Extras"]),
+        ("Gratificación", datos["Gratificacion"]),
+        ("TOTAL IMPONIBLE", datos["Imponible Calculado"]),
+        ("Asig. Colación", datos["Colacion"]),
+        ("Asig. Movilización", datos["Movilizacion"]),
+        ("TOTAL HABERES", datos["Total Haberes"])
+    ]
+    
+    descuentos_items = [
+        (f"AFP ({datos['Nombre AFP'].split('(')[0].strip()})", datos["Dcto AFP"]),
+        ("Fonasa (7% Obligatorio)", datos["Dcto Fonasa"]),
+        ("Seguro Cesantía (0.6%)", datos["Dcto Cesantia"]),
+        ("", ""),
+        ("", ""),
+        ("", ""),
+        ("TOTAL DESCUENTOS", datos["Descuentos Ley"])
+    ]
+    
+    for i in range(len(haberes_items)):
+        h_name, h_val = haberes_items[i]
+        d_name, d_val = descuentos_items[i]
+        
+        # Fila Haberes
+        pdf.set_font("Arial", 'B' if "TOTAL" in h_name else '', 10)
+        pdf.cell(65, 7, h_name, border='L')
+        val_h_str = formato_clp(h_val) if h_val not in ["", 0] else ""
+        pdf.cell(30, 7, val_h_str, border='R', align='R')
+        
+        # Fila Descuentos
+        pdf.set_font("Arial", 'B' if "TOTAL" in d_name else '', 10)
+        pdf.cell(65, 7, d_name, border='L')
+        val_d_str = formato_clp(d_val) if d_val not in ["", 0] else ""
+        pdf.cell(30, 7, val_d_str, border='R', ln=True, align='R')
+        
+        # Línea separadora para el total imponible
+        if "TOTAL IMPONIBLE" in h_name:
+            y_curr = pdf.get_y()
+            pdf.line(10, y_curr, 105, y_curr)
+
+    # Cerrar la tabla por abajo
+    pdf.cell(95, 0, "", border='T')
+    pdf.cell(95, 0, "", border='T', ln=True)
+    pdf.ln(8)
+    
+    # --- RESUMEN FINAL ---
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(100, 8, "", border=0)
+    pdf.cell(45, 8, "ALCANCE LÍQUIDO:", border=0)
+    pdf.cell(45, 8, formato_clp(datos["Líquido a Pagar"]), border=0, ln=True, align='R')
+    
+    pdf.cell(100, 8, "", border=0)
+    pdf.cell(45, 8, "TOTAL A PAGAR:", border=0)
+    pdf.cell(45, 8, formato_clp(datos["Líquido a Pagar"]), border=0, ln=True, align='R')
+    
+    pdf.ln(8)
+    
+    # --- MONTO EN PALABRAS Y LEGAL ---
+    pdf.set_font("Arial", '', 10)
+    texto_son = f"SON: {num2words(int(datos['Líquido a Pagar']))} PESOS"
+    texto_son = texto_son.replace("  ", " ")
+    pdf.multi_cell(0, 6, texto_son)
+    
+    pdf.ln(5)
+    pdf.set_font("Arial", '', 8)
+    disclaimer = "Certifico que he recibido conforme y no tengo cargos ni cobro alguno posterior que hacer, por ninguno de los conceptos comprometidos en ella. La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador."
+    pdf.multi_cell(0, 4, disclaimer)
+    
+    pdf.ln(25)
+    pdf.cell(0, 5, "___________________________________", ln=True, align='C')
+    pdf.cell(0, 5, "FIRMA TRABAJADOR", ln=True, align='C')
+    
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
     with open(temp_path, "rb") as f: pdf_bytes = f.read()
@@ -279,7 +384,7 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (LAYOUT EN 2 NIVELES)
+# 5. NAVEGACIÓN SUPERIOR
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
@@ -405,28 +510,32 @@ if st.session_state.menu_actual == "Finanzas":
             with st.container(border=True):
                 st.subheader("Proyección de Liquidaciones")
                 df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
-                df_liq_format = df_liquidaciones.copy()
+                
+                # Mantenemos la tabla de visualización limpia con solo las columnas clave
+                df_liq_visual = df_liquidaciones[["Trabajador", "Cargo", "Contrato", "Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]].copy()
                 for col in ["Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
-                    df_liq_format[col] = df_liq_format[col].apply(formato_clp)
-                st.dataframe(df_liq_format, use_container_width=True)
+                    df_liq_visual[col] = df_liq_visual[col].apply(formato_clp)
+                    
+                st.dataframe(df_liq_visual, use_container_width=True)
                 st.info(f"**Costo Total Proyectado de Nómina:** {formato_clp(total_nomina_empresa)}")
                 
                 st.divider()
-                st.markdown("#### 📄 Emisión de Liquidaciones (Formato PDF)")
+                st.markdown("#### 📄 Emisión de Liquidaciones Oficiales (PDF)")
                 if FPDF_DISPONIBLE:
                     trab_lista = df_liquidaciones['Trabajador'].tolist()
                     if trab_lista:
                         col_sel, col_btn = st.columns([3, 1], vertical_alignment="bottom")
                         trab_seleccionado = col_sel.selectbox("Seleccione un trabajador:", trab_lista)
+                        # Le pasamos todos los datos (incluyendo desgloses) a la función que genera el PDF
                         datos_trabajador_pdf = df_liquidaciones[df_liquidaciones['Trabajador'] == trab_seleccionado].iloc[0]
                         pdf_generado_bytes = generar_pdf_liquidacion(datos_trabajador_pdf)
                         col_btn.download_button(
-                            label="⬇️ Descargar PDF", data=pdf_generado_bytes,
+                            label="⬇️ Descargar PDF Oficial", data=pdf_generado_bytes,
                             file_name=f"Liquidacion_{trab_seleccionado.replace(' ', '_')}.pdf",
                             mime="application/pdf", type="primary", use_container_width=True
                         )
                 else:
-                    st.error("⚠️ La librería para crear PDFs no está instalada. Ejecuta 'pip install fpdf' o añádelo a tu requirements.txt")
+                    st.error("⚠️ La librería para crear PDFs no está instalada.")
 
         with tab_fijos:
             with st.container(border=True):
@@ -468,7 +577,6 @@ if st.session_state.menu_actual == "Finanzas":
 # ==========================================
 elif st.session_state.menu_actual == "Presupuestos":
     st.markdown("### Gestión de Presupuestos y Cotizaciones")
-    
     with st.container(border=True):
         with st.expander("➕ Crear Nueva Cotización / Presupuesto", expanded=False):
             tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True)
@@ -492,7 +600,6 @@ elif st.session_state.menu_actual == "Presupuestos":
             colP3.text_input("Monto Total Cotizado (CLP):", key="input_monto_presupuesto", on_change=formatear_input, kwargs={'llave': 'input_monto_presupuesto'})
             monto_pres = float(st.session_state['input_monto_presupuesto'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
             
-            # --- Calendario con formato Chileno DD/MM/YYYY ---
             fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY")
             
             colP5, colP6, colP7 = st.columns(3)
@@ -522,7 +629,6 @@ elif st.session_state.menu_actual == "Presupuestos":
         if st.session_state.presupuestos.empty:
             st.info("Aún no hay cotizaciones emitidas en el sistema.")
         else:
-            st.caption("Actualiza el estado, la aprobación o el número de OC directamente en la tabla:")
             opciones_estado = ["Presupuestada", "Adjudicada", "En progreso", "Entregada", "Pagada"]
             opciones_aprobacion = ["Pendiente", "Aprobada", "No Aprobada"]
             opciones_orden = ["Sin Orden", "Con Orden"]
@@ -638,7 +744,6 @@ elif st.session_state.menu_actual == "Proyectos":
             if st.session_state.acceso_proyectos == "admin":
                 with st.container(border=True):
                     with st.expander("💸 Asignar Personal y Cargar al Gasto (Vínculo a Operaciones)", expanded=False):
-                        st.info("💡 Al asignarle presupuesto a un trabajador aquí, lo autorizas automáticamente para ser parte del equipo en la pestaña de 'Operaciones'.")
                         df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
                         trabajadores = ["Seleccione..."] + df_liq["Trabajador"].tolist()
                         colT1, colT2, colT3 = st.columns([2, 1, 1])
@@ -700,7 +805,7 @@ elif st.session_state.menu_actual == "Operaciones":
     proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
     if not proyectos_lista_seg:
         with st.container(border=True):
-            st.warning("No hay proyectos creados. Ve a la pestaña 'Proyectos' para crear tu primera obra.")
+            st.warning("No hay proyectos creado. Ve a la pestaña 'Proyectos' para crear tu primera obra.")
     else:
         proyecto_seg = st.selectbox("Selecciona un Proyecto a gestionar:", proyectos_lista_seg)
         idx_p_seg = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seg].index[0]
@@ -720,13 +825,11 @@ elif st.session_state.menu_actual == "Operaciones":
                 except:
                     return None
             
-            # --- Calendarios Interactivos con formato Chileno DD/MM/YYYY ---
             nuevo_ini = colF1.date_input("Fecha de Inicio:", value=parse_fecha(val_ini), format="DD/MM/YYYY")
             nuevo_fin = colF2.date_input("Fecha de Término:", value=parse_fecha(val_fin), format="DD/MM/YYYY")
             
             nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 3 meses")
             if st.button("Guardar Fechas del Proyecto"):
-                # Conversión interna a YYYY-MM-DD para la base de datos y gráficos
                 str_ini = nuevo_ini.strftime('%Y-%m-%d') if nuevo_ini else "Pendiente"
                 str_fin = nuevo_fin.strftime('%Y-%m-%d') if nuevo_fin else "Pendiente"
                 
@@ -894,11 +997,9 @@ elif st.session_state.menu_actual == "Inventario":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 6: BALANCE TOTAL (MEJORADO CON SELECTOR INTERNO)
+# PANTALLA 6: BALANCE TOTAL
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
-    
-    # 1. Definir bases de fechas y extracción de datos globales
     current_year = datetime.datetime.now().year
     meses_año_actual = [f"{current_year}-{str(i).zfill(2)}" for i in range(1, 13)]
     meses_set = set(meses_año_actual)
@@ -934,15 +1035,12 @@ elif st.session_state.menu_actual == "Balance":
         
     df_full = pd.DataFrame(datos_grafico)
 
-    # 2. Renderizado del recuadro principal
     with st.container(border=True):
         st.markdown("#### 💡 Balance Financiero Acumulado")
         
-        # El selector ahora está dentro del contenedor y debajo del título
         col_f1, col_f2 = st.columns(2)
         vista_balance = col_f1.selectbox("📅 Temporalidad del Balance:", ["Proyección Anual (12 Meses)", "Vista Mensual Específica", "Histórico Completo"])
         
-        # Filtros basados en la selección
         if vista_balance == "Proyección Anual (12 Meses)":
             meses_filtrados = meses_año_actual
             titulo_metricas = "Proyección Anual (Año en Curso)"
@@ -954,14 +1052,13 @@ elif st.session_state.menu_actual == "Balance":
             meses_filtrados = [mes_seleccionado]
             titulo_metricas = f"Balance del Mes: {mes_seleccionado}"
             desc_metricas = "Análisis aislado de ingresos y egresos para el mes seleccionado."
-        else: # Histórico
+        else: 
             meses_filtrados = meses_totales
             titulo_metricas = "Balance Histórico Acumulado"
             desc_metricas = "Suma global de todos los meses y proyectos registrados."
             
         df_filtrado = df_full[df_full["Mes"].isin(meses_filtrados)].copy()
         
-        # Formato de Tooltips en CLP Millones
         def formato_tooltip_millones(row):
             val_m = row["Monto"] / 1000000
             val_str = f"{int(val_m)}" if val_m.is_integer() else f"{val_m:.1f}"
@@ -969,7 +1066,6 @@ elif st.session_state.menu_actual == "Balance":
             
         df_filtrado["Detalle_Tooltip"] = df_filtrado.apply(formato_tooltip_millones, axis=1)
         
-        # Cálculo de métricas filtradas
         ingresos_totales = df_filtrado[df_filtrado["Tipo"] == "Ingresos (+)"]["Monto"].sum()
         egresos_totales = df_filtrado[df_filtrado["Tipo"] == "Egresos (-)"]["Monto"].sum()
         rentabilidad = ingresos_totales - egresos_totales
@@ -989,25 +1085,20 @@ elif st.session_state.menu_actual == "Balance":
         st.markdown("#### 📈 Estado de Resultado Mensualizado")
         st.caption("Las barras muestran el balance de ingresos y salidas de capital.")
         
-        # Lógica de dibujo del Eje X: Si es anual o mensual, forzamos a mostrar los 12 meses
         if vista_balance == "Histórico Completo":
-            x_scale = alt.Scale() # Autoajuste a todo el historial
+            x_scale = alt.Scale() 
             x_sort = meses_totales
         else:
-            x_scale = alt.Scale(domain=meses_año_actual) # Fuerza la aparición de los 12 meses del año
+            x_scale = alt.Scale(domain=meses_año_actual) 
             x_sort = meses_año_actual
             
-        # Gráfico estricto con los parámetros solicitados
         grafico_balance = alt.Chart(df_filtrado).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
             x=alt.X("Mes:O", title="Períodos", sort=x_sort, scale=x_scale, axis=alt.Axis(labelAngle=-45)),
             xOffset=alt.XOffset("Tipo:N", sort=["Ingresos (+)", "Egresos (-)"]),
-            
-            # Eje Y estricto en 0, 50 y 100 Millones
             y=alt.Y("Monto:Q", 
                     title="", 
                     scale=alt.Scale(domain=[0, 100000000]), 
                     axis=alt.Axis(values=[0, 50000000, 100000000], labelExpr="datum.value == 0 ? '0' : datum.value / 1000000 + 'M'")),
-            
             color=alt.Color("Tipo:N", 
                             scale=alt.Scale(domain=["Ingresos (+)", "Egresos (-)"], 
                                             range=["#3b82f6", "#e53e3e"]),
