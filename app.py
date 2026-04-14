@@ -70,7 +70,8 @@ def guardar_datos(nombre_hoja, df):
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
         
-        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
+        # Añadido RUT a columnas string para evitar errores de formato en Sheets
+        columnas_str = ['RUT', 'Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
         for col in columnas_str:
             if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
             
@@ -101,6 +102,7 @@ TASAS_AFP = {
 
 if 'nomina' not in st.session_state:
     df_nomina_base = pd.DataFrame([{
+        "RUT": "11.111.111-1",
         "Trabajador": "Begoñia Mac-Conell Bacho", "Cargo": "Jefa de administracion y finanzas",
         "Sueldo_Base": 850000, "Jornada_Hrs": 44, "Tipo_Contrato": "Indefinido", "Gratificacion": "Tope Legal Mensual", "AFP": "Habitat (11.27%)",
         "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Colacion": 0, "Movilizacion": 0
@@ -189,7 +191,9 @@ def calcular_liquidaciones(df):
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
         
+        # El RUT viaja invisible hasta el generador de PDF
         resultados.append({
+            "RUT": str(row.get('RUT', 'Sin Registro')),
             "Trabajador": row['Trabajador'], "Cargo": row['Cargo'], "Contrato": tipo_contrato,
             "Sueldo Base": sueldo_base, "Horas Extras": pago_extras, "Gratificacion": grati_monto,
             "Colacion": colacion, "Movilizacion": movilizacion, 
@@ -226,10 +230,9 @@ def num2words(n):
 
 
 # ==========================================
-# MOTOR DE COORDENADAS: CLON EXACTO DEL WORD (MARZO 2026) CON RECUADROS
+# MOTOR DE COORDENADAS PARA EL PDF
 # ==========================================
 def right_text(pdf, x, y, text):
-    """Alinea textos perfectamente a la derecha"""
     width = pdf.get_string_width(text)
     pdf.text(x - width, y, text)
 
@@ -238,7 +241,6 @@ def generar_pdf_liquidacion(datos):
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # 1. ENCABEZADO Y TÍTULO
     pdf.set_font("Arial", 'B', 10)
     pdf.text(10, 15, "VOLTIFY SPA")
     pdf.set_font("Arial", '', 9)
@@ -248,10 +250,9 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", 'B', 12)
     pdf.text(120, 20, "Liquidación de Sueldo Mensual")
     
-    # 2. RECUADRO DE DATOS DEL TRABAJADOR
-    pdf.rect(10, 30, 190, 25) # Caja contenedora
+    pdf.rect(10, 30, 190, 25) 
     
-    rut_trabajador = datos.get("RUT", "11.111.111-1")
+    rut_trabajador = datos.get("RUT", "Sin Registro")
     trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
     cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
     
@@ -259,11 +260,10 @@ def generar_pdf_liquidacion(datos):
     mes_actual = meses_str[datetime.datetime.now().month - 1]
     anio_actual = datetime.datetime.now().year
     
-    # Fila 1 de datos
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, 35, "RUT:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(25, 35, rut_trabajador)
+    pdf.text(25, 35, rut_trabajador) # RUT INYECTADO AQUÍ
     
     pdf.set_font("Arial", 'B', 9)
     pdf.text(60, 35, "Nombre:")
@@ -273,9 +273,8 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", 'B', 9)
     pdf.text(150, 35, "Fecha Contrato:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(175, 35, ": 16/03/2026") # Ajustable según BD
+    pdf.text(175, 35, ": 16/03/2026")
     
-    # Fila 2 de datos
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, 42, "Año:")
     pdf.set_font("Arial", '', 9)
@@ -301,17 +300,15 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 9)
     pdf.text(175, 42, "39.841,72")
     
-    # Fila 3 de datos
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, 49, "Cargo:")
     pdf.set_font("Arial", '', 9)
     pdf.text(25, 49, cargo_limpio)
     
-    # 3. TABLA PRINCIPAL (HABERES Y DESCUENTOS)
     y_t = 60
-    pdf.rect(10, y_t, 190, 115) # Caja principal
-    pdf.line(105, y_t, 105, y_t + 115) # Divisor vertical
-    pdf.line(10, y_t + 7, 200, y_t + 7) # Subrayado de títulos
+    pdf.rect(10, y_t, 190, 115)
+    pdf.line(105, y_t, 105, y_t + 115) 
+    pdf.line(10, y_t + 7, 200, y_t + 7)
     
     pdf.set_font("Arial", 'B', 10)
     pdf.text(45, y_t + 5, "HABERES")
@@ -322,16 +319,13 @@ def generar_pdf_liquidacion(datos):
     dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
     sueldo_prop = datos["Sueldo Base"] / 30 * dias_trabajados
     
-    # --- Columna Izquierda (Haberes) ---
     y_h = y_t + 13
     pdf.text(12, y_h, f"Días Trabajados: {dias_trabajados},00")
-    
-    # Modificación preventiva: Indentación movida a X=45
     pdf.text(45, y_h, "Sueldo:")
     right_text(pdf, 102, y_h, formato_clp(sueldo_prop).replace("$","").strip())
     
     y_h += 6
-    pdf.text(12, y_h, "Horas : 0.0     50.00%") # Datos estáticos maqueta
+    pdf.text(12, y_h, "Horas : 0.0     50.00%")
     pdf.text(45, y_h, "Total Horas Extras:")
     right_text(pdf, 102, y_h, formato_clp(datos["Horas Extras"]).replace("$","").strip())
     
@@ -340,7 +334,7 @@ def generar_pdf_liquidacion(datos):
     right_text(pdf, 102, y_h, formato_clp(datos["Gratificacion"]).replace("$","").strip())
     
     y_h += 8
-    pdf.line(10, y_h - 4, 105, y_h - 4) # Divisor interno
+    pdf.line(10, y_h - 4, 105, y_h - 4) 
     pdf.set_font("Arial", 'B', 9)
     pdf.text(45, y_h, "Total Imponible:")
     right_text(pdf, 102, y_h, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
@@ -364,14 +358,11 @@ def generar_pdf_liquidacion(datos):
     right_text(pdf, 102, y_h, formato_clp(datos["Total Haberes"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
     
-    # --- Columna Derecha (Descuentos) ---
     afp_nombre = datos["Nombre AFP"].split('(')[0].strip()
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
     
     y_d = y_t + 13
     pdf.text(107, y_d, f"AFP: {afp_nombre}")
-    
-    # Modificación preventiva: Indentación movida a X=140
     pdf.text(140, y_d, "Base AFP:")
     pdf.text(160, y_d, afp_tasa)
     right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
@@ -390,13 +381,12 @@ def generar_pdf_liquidacion(datos):
     y_d += 6
     pdf.text(107, y_d, "Cotización Pactado:")
     pdf.text(140, y_d, "0 UF")
-    right_text(pdf, 198, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip()) # Según PDF, repite valor
+    right_text(pdf, 198, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip())
     
     y_d += 6
     if datos["Dcto Cesantia"] > 0:
         pdf.text(140, y_d, "Base AFC:")
         right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
-        
         y_d += 6
         pdf.text(140, y_d, "Cotización AFC Trabajador:")
         right_text(pdf, 198, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
@@ -409,10 +399,8 @@ def generar_pdf_liquidacion(datos):
     
     y_d += 8
     pdf.text(107, y_d, "Días no Trabajador")
-    
     y_d += 6
     pdf.text(107, y_d, "Licencia:")
-    
     y_d += 6
     pdf.text(107, y_d, "Faltas:")
     pdf.text(125, y_d, str(int(datos.get("Dias_Falta", 0))))
@@ -429,11 +417,9 @@ def generar_pdf_liquidacion(datos):
     pdf.text(140, y_d, "TOTAL DESCUENTO")
     right_text(pdf, 198, y_d, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
     
-    # Línea separadora final de totales
     y_bottom = max(y_h, y_d) + 5
     pdf.line(10, y_bottom, 200, y_bottom)
     
-    # --- 5. ALCANCE LÍQUIDO ---
     y_alcance = y_bottom + 6
     pdf.text(107, y_alcance, "ALCANCE LIQUIDO")
     right_text(pdf, 195, y_alcance, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
@@ -444,25 +430,22 @@ def generar_pdf_liquidacion(datos):
     
     pdf.line(10, y_alcance + 4, 200, y_alcance + 4)
     
-    # --- 6. TEXTO LEGAL EN PALABRAS Y FIRMA ---
     y_palabras = y_alcance + 12
     pdf.set_font("Arial", '', 9)
     texto_son = num2words(int(datos['Líquido a Pagar'])).upper()
     pdf.text(10, y_palabras, f"SON: {texto_son} PESOS")
     
     y_palabras += 10
-    disclaimer1 = "Certifico que he recibido conforme y no tengo cargos ni cobro alguno posterior que hacer, por ninguno de los"
-    disclaimer2 = "conceptos comprometidos en ella."
-    pdf.text(10, y_palabras, disclaimer1)
-    pdf.text(10, y_palabras + 4, disclaimer2)
+    pdf.text(10, y_palabras, "Certifico que he recibido conforme y no tengo cargos ni cobro alguno posterior que hacer, por ninguno de los")
+    pdf.text(10, y_palabras + 4, "conceptos comprometidos en ella.")
     
-    # Firmas
     y_firmas = y_palabras + 25
+    pdf.set_font("Arial", 'B', 9)
     pdf.text(10, y_firmas, "FIRMA TRABAJADOR")
     
     y_final = y_firmas + 10
-    disclaimer_final = "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador."
-    pdf.text(10, y_final, disclaimer_final)
+    pdf.set_font("Arial", '', 8)
+    pdf.text(10, y_final, "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador.")
     
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
@@ -577,16 +560,17 @@ if st.session_state.menu_actual == "Finanzas":
                 st.subheader("Control de Asistencia y Nómina")
                 if st.session_state.acceso_finanzas == "admin":
                     with st.expander("➕ Ingresar Nuevo Trabajador", expanded=False):
-                        colA, colB, colC = st.columns(3)
+                        # --- NUEVO: Formulario con campo RUT visible al ingresar ---
+                        colRUT, colA, colB = st.columns([1, 2, 2])
+                        n_rut = colRUT.text_input("RUT (Ej: 12.345.678-9)")
                         n_trabajador = colA.text_input("Nombre Completo")
                         n_cargo = colB.text_input("Cargo")
                         
                         if 'input_sueldo_base' not in st.session_state: st.session_state['input_sueldo_base'] = "0"
+                        colC, colD, colE = st.columns([2, 1, 2])
                         colC.text_input("Sueldo Base Mensual", key="input_sueldo_base", on_change=formatear_input, kwargs={'llave': 'input_sueldo_base'})
                         n_sueldo = float(st.session_state['input_sueldo_base'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-                        
-                        colD, colE = st.columns(2)
-                        n_jornada = colD.number_input("Horas Semanales (Jornada)", value=44, max_value=45)
+                        n_jornada = colD.number_input("Hrs Semanales", value=44, max_value=45)
                         n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"])
                         
                         colF, colG = st.columns(2)
@@ -602,9 +586,9 @@ if st.session_state.menu_actual == "Finanzas":
                         n_movi = float(st.session_state['input_movilizacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                         
                         if st.button("Guardar Perfil"):
-                            if n_trabajador:
+                            if n_trabajador and n_rut:
                                 nuevo_perfil = pd.DataFrame([{
-                                    "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
+                                    "RUT": n_rut, "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
                                     "Jornada_Hrs": n_jornada, "Tipo_Contrato": n_contrato, "Gratificacion": n_grati, 
                                     "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
                                     "Colacion": n_cola, "Movilizacion": n_movi
@@ -613,11 +597,14 @@ if st.session_state.menu_actual == "Finanzas":
                                 guardar_datos("Nomina_Personal", st.session_state.nomina)
                                 st.success("Trabajador registrado exitosamente.")
                                 st.rerun()
+                            else:
+                                st.error("El RUT y el Nombre son obligatorios.")
 
                     st.caption("Modifique datos interactivos directamente en la tabla:")
                     df_nomina_edit = st.data_editor(
                         st.session_state.nomina,
                         column_config={
+                            "RUT": None, # <--- ESTA ES LA MAGIA: El RUT existe pero es 100% invisible en la tabla.
                             "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, format="%,d"),
                             "Colacion": st.column_config.NumberColumn("Colación", min_value=0, format="%,d"),
                             "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, format="%,d"),
@@ -632,12 +619,14 @@ if st.session_state.menu_actual == "Finanzas":
                         guardar_datos("Nomina_Personal", st.session_state.nomina)
                         st.success("Nómina actualizada.")
                 else:
-                    st.dataframe(st.session_state.nomina, use_container_width=True)
+                    # En modo lectura, aseguramos también ocultar el RUT para seguridad
+                    st.dataframe(st.session_state.nomina.drop(columns=["RUT"], errors='ignore'), use_container_width=True)
 
             with st.container(border=True):
                 st.subheader("Proyección de Liquidaciones")
                 df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
                 
+                # Vista resumen (sin mostrar RUT)
                 df_liq_visual = df_liquidaciones[["Trabajador", "Cargo", "Contrato", "Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]].copy()
                 for col in ["Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
                     df_liq_visual[col] = df_liq_visual[col].apply(formato_clp)
