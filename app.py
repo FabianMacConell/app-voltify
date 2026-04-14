@@ -404,7 +404,7 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 9)
     
     y_d += 8
-    pdf.text(107, y_d, "Días no Trabajador")
+    pdf.text(107, y_d, "Días no Trabajados")
     
     y_d += 6
     pdf.text(107, y_d, "Licencia:")
