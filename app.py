@@ -189,7 +189,6 @@ def calcular_liquidaciones(df):
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
         
-        # Agregamos TODOS los detalles al diccionario para usarlos en el PDF oficial
         resultados.append({
             "Trabajador": row['Trabajador'], "Cargo": row['Cargo'], "Contrato": tipo_contrato,
             "Sueldo Base": sueldo_base, "Horas Extras": pago_extras, "Gratificacion": grati_monto,
@@ -204,26 +203,27 @@ def calcular_liquidaciones(df):
         })
     return pd.DataFrame(resultados), costo_empresa_total
 
-# Algoritmo conversor de números a palabras para liquidaciones
+# --- NUEVO ALGORITMO MEJORADO PARA PALABRAS ---
 def num2words(n):
+    if n == 0: return "CERO"
     unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE", "VEINTE", "VEINTIUN", "VEINTIDOS", "VEINTITRES", "VEINTICUATRO", "VEINTICINCO", "VEINTISEIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE"]
     decenas = ["", "DIEZ", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
-    centenas = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
+    centenas = ["", "CIEN", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
 
-    if n == 0: return "CERO"
-    if n == 100: return "CIEN"
     if n < 30: return unidades[n]
     if n < 100:
-        if n % 10 == 0: return decenas[n // 10]
-        else: return decenas[n // 10] + " Y " + unidades[n % 10]
+        return decenas[n // 10] + (" Y " + unidades[n % 10] if n % 10 != 0 else "")
     if n < 1000:
-        if n % 100 == 0: return centenas[n // 100]
-        else: return centenas[n // 100] + " " + num2words(n % 100)
-    if n < 2000: return "MIL " + num2words(n % 1000)
-    if n < 1000000: return num2words(n // 1000) + " MIL " + num2words(n % 1000)
+        if n == 100: return "CIEN"
+        return (centenas[n // 100] if n // 100 != 1 else "CIENTO") + (" " + num2words(n % 100) if n % 100 != 0 else "")
+    if n < 2000:
+        return "MIL" + (" " + num2words(n % 1000) if n % 1000 != 0 else "")
+    if n < 1000000:
+        return num2words(n // 1000) + " MIL" + (" " + num2words(n % 1000) if n % 1000 != 0 else "")
     if n == 1000000: return "UN MILLON"
-    if n < 2000000: return "UN MILLON " + num2words(n % 1000000)
-    return num2words(n // 1000000) + " MILLONES " + num2words(n % 1000000)
+    if n < 2000000:
+        return "UN MILLON" + (" " + num2words(n % 1000000) if n % 1000000 != 0 else "")
+    return num2words(n // 1000000) + " MILLONES" + (" " + num2words(n % 1000000) if n % 1000000 != 0 else "")
 
 def generar_pdf_liquidacion(datos):
     pdf = FPDF()
@@ -244,7 +244,7 @@ def generar_pdf_liquidacion(datos):
     pdf.ln(4)
     
     # --- DATOS DEL TRABAJADOR ---
-    rut_trabajador = datos.get("RUT", "11.111.111-1") # Usamos un default si no se ha ingresado
+    rut_trabajador = datos.get("RUT", "11.111.111-1")
     nombre_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1')
     cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1')
     
@@ -292,95 +292,54 @@ def generar_pdf_liquidacion(datos):
     pdf.line(10, pdf.get_y()+2, 200, pdf.get_y()+2)
     pdf.ln(5)
     
-    # --- TABLA DE HABERES Y DESCUENTOS ---
+    # --- ESTRUCTURA PERFECTA DE TABLA FILA POR FILA ---
+    # Encabezados
     pdf.set_font("Arial", 'B', 10)
     pdf.cell(95, 6, "HABERES", border=1, align='C')
     pdf.cell(95, 6, "DESCUENTOS", border=1, ln=1, align='C')
     
-    y_start = pdf.get_y()
-    
-    # -- LADO IZQUIERDO: HABERES --
-    pdf.set_xy(10, y_start)
-    pdf.set_font("Arial", '', 9)
-    
+    # Cálculos Previos
     sueldo_prop = datos["Sueldo Base"] / 30 * dias_trabajados
-    pdf.cell(65, 5, "Sueldo:", border='L')
-    pdf.cell(30, 5, formato_clp(sueldo_prop), border='R', align='R', ln=2)
-    
-    pdf.cell(65, 5, "Horas Extras:", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Horas Extras"]) if datos["Horas Extras"] > 0 else "", border='R', align='R', ln=2)
-    
-    pdf.cell(65, 5, "Gratificación:", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Gratificacion"]), border='R', align='R', ln=2)
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.cell(65, 5, "Total Imponible:", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Imponible Calculado"]), border='R', align='R', ln=2)
-    
-    pdf.set_font("Arial", '', 9)
-    pdf.cell(95, 5, "", border='LR', ln=2) # Espacio separador
-    
-    pdf.cell(65, 5, "Asignación Movilización:", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Movilizacion"]), border='R', align='R', ln=2)
-    
-    pdf.cell(65, 5, "Asignación Colación:", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Colacion"]), border='R', align='R', ln=2)
-    
-    pdf.cell(95, 5, "", border='LR', ln=2)
-    pdf.cell(95, 5, "", border='LR', ln=2)
-    pdf.cell(95, 5, "", border='LR', ln=2)
-    
-    y_end_haberes = pdf.get_y()
-    
-    # -- LADO DERECHO: DESCUENTOS --
-    pdf.set_xy(105, y_start)
-    
     afp_nombre = datos["Nombre AFP"].split('(')[0].strip()
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
     
-    pdf.cell(65, 5, f"AFP: {afp_nombre} ({afp_tasa})", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Dcto AFP"]), border='R', align='R', ln=2)
+    # Matriz de Filas (Alineación Horizontal Bloqueada)
+    # Formato: (Haber_Name, Haber_Val, Desc_Name, Desc_Val, is_bold_Haber, is_bold_Desc)
+    filas = [
+        ("Sueldo:", formato_clp(sueldo_prop), f"AFP: {afp_nombre} ({afp_tasa})", formato_clp(datos["Dcto AFP"]), False, False),
+        ("Horas Extras:", formato_clp(datos["Horas Extras"]) if datos["Horas Extras"] > 0 else "", "Isapre: Fonasa (7% Obligatorio)", formato_clp(datos["Dcto Fonasa"]), False, False),
+        ("Gratificación:", formato_clp(datos["Gratificacion"]) if datos["Gratificacion"] > 0 else "", "Cotización AFC Trabajador:", formato_clp(datos["Dcto Cesantia"]) if datos["Dcto Cesantia"] > 0 else "", False, False),
+        ("Total Imponible:", formato_clp(datos["Imponible Calculado"]), "Total Previsión:", formato_clp(datos["Descuentos Ley"]), True, True),
+        ("", "", "", "", False, False),
+        ("Asignación Movilización:", formato_clp(datos["Movilizacion"]) if datos["Movilizacion"] > 0 else "", "Días no Trabajados:", "", False, True),
+        ("Asignación Colación:", formato_clp(datos["Colacion"]) if datos["Colacion"] > 0 else "", "Faltas:", str(int(datos.get("Dias_Falta", 0))), False, False),
+        ("", "", "", "", False, False)
+    ]
     
-    pdf.cell(65, 5, "Isapre: Fonasa (7% Obligatorio)", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Dcto Fonasa"]), border='R', align='R', ln=2)
-    
-    pdf.cell(65, 5, "Cotización AFC Trabajador:", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Dcto Cesantia"]) if datos["Dcto Cesantia"] > 0 else "", border='R', align='R', ln=2)
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.cell(65, 5, "Total Previsión:", border='L')
-    pdf.cell(30, 5, formato_clp(datos["Descuentos Ley"]), border='R', align='R', ln=2)
-    
-    pdf.set_font("Arial", '', 9)
-    pdf.cell(95, 5, "", border='LR', ln=2)
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.cell(95, 5, "Días no Trabajados", border='LR', ln=2)
-    pdf.set_font("Arial", '', 9)
-    pdf.cell(65, 5, "Faltas:", border='L')
-    pdf.cell(30, 5, str(int(datos.get("Dias_Falta", 0))), border='R', align='R', ln=2)
-    
-    pdf.cell(95, 5, "", border='LR', ln=2)
-    pdf.cell(95, 5, "", border='LR', ln=2)
-    pdf.cell(95, 5, "", border='LR', ln=2)
-    
-    y_end_descuentos = pdf.get_y()
-    
-    # Alinear al punto más bajo para cerrar la tabla
-    y_bottom = max(y_end_haberes, y_end_descuentos)
-    pdf.set_y(y_bottom)
-    
-    # --- TOTALES ---
-    pdf.set_font("Arial", 'B', 9)
+    # Bucle de dibujo (Forzando ln=1 al final de la columna derecha para no perder el eje X)
+    for h_name, h_val, d_name, d_val, bold_h, bold_d in filas:
+        # Columna Izquierda
+        pdf.set_font("Arial", 'B' if bold_h else '', 9)
+        pdf.cell(65, 5, h_name, border='L')
+        pdf.cell(30, 5, h_val, border='R', align='R')
+        
+        # Columna Derecha
+        pdf.set_font("Arial", 'B' if bold_d else '', 9)
+        pdf.cell(65, 5, d_name, border='L')
+        pdf.cell(30, 5, d_val, border='R', align='R', ln=1)  # ln=1 cierra la fila y baja a la siguiente línea perfecta
+
+    # --- FILA DE TOTALES (Bordes Inferiores) ---
+    pdf.set_font("Arial", 'B', 10)
     pdf.cell(65, 6, "TOTAL HABERES:", border='LB')
     pdf.cell(30, 6, formato_clp(datos["Total Haberes"]), border='RB', align='R')
     
-    pdf.cell(65, 6, "TOTAL DESCUENTO:", border='LB')
+    pdf.cell(65, 6, "TOTAL DESCUENTOS:", border='LB')
     pdf.cell(30, 6, formato_clp(datos["Descuentos Ley"]), border='RB', ln=1, align='R')
     
     pdf.ln(5)
     
     # --- ALCANCE LÍQUIDO ---
+    pdf.set_font("Arial", 'B', 11)
     pdf.cell(105, 6, "", border=0)
     pdf.cell(55, 6, "ALCANCE LÍQUIDO", border=0)
     pdf.cell(30, 6, formato_clp(datos["Líquido a Pagar"]), border=0, ln=1, align='R')
@@ -392,7 +351,7 @@ def generar_pdf_liquidacion(datos):
     pdf.ln(5)
     
     # --- MONTO EN PALABRAS Y DECLARACIÓN ---
-    pdf.set_font("Arial", '', 9)
+    pdf.set_font("Arial", '', 10)
     texto_son = f"SON: {num2words(int(datos['Líquido a Pagar']))} PESOS"
     pdf.multi_cell(0, 5, texto_son)
     
@@ -1067,7 +1026,7 @@ elif st.session_state.menu_actual == "Inventario":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 6: BALANCE TOTAL
+# PANTALLA 6: BALANCE TOTAL (MEJORADO CON SELECTOR INTERNO)
 # ==========================================
 elif st.session_state.menu_actual == "Balance":
     
