@@ -70,7 +70,7 @@ def guardar_datos(nombre_hoja, df):
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
         
-        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
+        columnas_str = ['RUT', 'Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
         for col in columnas_str:
             if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
             
@@ -101,11 +101,21 @@ TASAS_AFP = {
 
 if 'nomina' not in st.session_state:
     df_nomina_base = pd.DataFrame([{
+        "RUT": "11.111.111-1",
         "Trabajador": "Begoñia Mac-Conell Bacho", "Cargo": "Jefa de administracion y finanzas",
         "Sueldo_Base": 850000, "Jornada_Hrs": 44, "Tipo_Contrato": "Indefinido", "Gratificacion": "Tope Legal Mensual", "AFP": "Habitat (11.27%)",
-        "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Colacion": 0, "Movilizacion": 0
+        "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Colacion": 0, "Movilizacion": 0, "Anticipo": 0
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
+
+# GARANTÍA DE RETROCOMPATIBILIDAD
+columnas_obligatorias = ["Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Anticipo"]
+for col in columnas_obligatorias:
+    if col not in st.session_state.nomina.columns:
+        st.session_state.nomina[col] = 0
+
+if 'RUT' not in st.session_state.nomina.columns:
+    st.session_state.nomina['RUT'] = "Sin Registro"
 
 if 'presupuestos' not in st.session_state:
     df_presupuestos_base = pd.DataFrame(columns=["Tipo", "Referencia", "Cliente", "Monto", "Aprobacion", "Orden_Compra", "Num_OC", "Estado_Comercial", "Fecha_Emision"])
@@ -154,10 +164,15 @@ def calcular_liquidaciones(df):
     resultados = []
     costo_empresa_total = 0
     for index, row in df.iterrows():
-        try: sueldo_base = float(row['Sueldo_Base'])
+        try: sueldo_base = float(row.get('Sueldo_Base', 0))
         except: sueldo_base = 0.0
-        try: jornada = float(row['Jornada_Hrs'])
+        try: jornada = float(row.get('Jornada_Hrs', 44))
         except: jornada = 44.0
+        
+        dias_falta = float(row.get('Dias_Falta', 0))
+        horas_atraso = float(row.get('Horas_Atraso', 0))
+        horas_extras_qty = float(row.get('Horas_Extras', 0))
+        anticipo = float(row.get('Anticipo', 0))
         
         valor_dia = sueldo_base / 30 if sueldo_base > 0 else 0
         valor_hora_normal = (sueldo_base / 30) * 28 / jornada if jornada > 0 else 0
@@ -168,9 +183,9 @@ def calcular_liquidaciones(df):
         elif tipo_grati == "25% del Sueldo (Sin Tope)": grati_monto = sueldo_base * 0.25
         else: grati_monto = 0
             
-        pago_extras = float(row.get('Horas_Extras', 0)) * valor_hora_extra
-        dcto_faltas = float(row.get('Dias_Falta', 0)) * valor_dia
-        dcto_atrasos = float(row.get('Horas_Atraso', 0)) * valor_hora_normal
+        pago_extras = horas_extras_qty * valor_hora_extra
+        dcto_faltas = dias_falta * valor_dia
+        dcto_atrasos = horas_atraso * valor_hora_normal
         
         sueldo_imponible = sueldo_base + grati_monto + pago_extras - dcto_faltas - dcto_atrasos
         if sueldo_imponible < 0: sueldo_imponible = 0
@@ -185,274 +200,300 @@ def calcular_liquidaciones(df):
         movilizacion = float(row.get('Movilizacion', 0))
         no_imponibles = colacion + movilizacion
         
-        sueldo_liquido = sueldo_imponible - dcto_afp - dcto_fonasa - dcto_cesantia + no_imponibles
+        total_prevision = dcto_afp + dcto_fonasa + dcto_cesantia
+        total_descuentos = total_prevision + anticipo 
+        
+        alcance_liquido = sueldo_imponible - total_prevision + no_imponibles
+        total_a_pagar = alcance_liquido - anticipo
+        
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
         
         resultados.append({
+            "RUT": str(row.get('RUT', 'Sin Registro')),
             "Trabajador": row['Trabajador'], "Cargo": row['Cargo'], "Contrato": tipo_contrato,
-            "Sueldo Base": sueldo_base, "Horas Extras": pago_extras, "Gratificacion": grati_monto,
+            "Sueldo Base": sueldo_base, "Sueldo Proporcional": sueldo_base - dcto_faltas - dcto_atrasos,
+            "Horas Extras Monto": pago_extras, "Horas Extras Qty": horas_extras_qty,
+            "Gratificacion": grati_monto,
             "Colacion": colacion, "Movilizacion": movilizacion, 
             "Nombre AFP": row.get('AFP', 'Habitat (11.27%)'), "Dcto AFP": dcto_afp,
             "Dcto Fonasa": dcto_fonasa, "Dcto Cesantia": dcto_cesantia,
             "Imponible Calculado": sueldo_imponible, "Haberes No Imponibles": no_imponibles, 
             "Total Haberes": sueldo_imponible + no_imponibles,
-            "Descuentos Ley": dcto_afp + dcto_fonasa + dcto_cesantia,
-            "Líquido a Pagar": sueldo_liquido, "Costo Empresa": costo_real_empresa,
-            "Dias_Falta": row.get('Dias_Falta', 0)
+            "Total Prevision": total_prevision,
+            "Anticipo": anticipo,
+            "Total Descuentos": total_descuentos, 
+            "Alcance Liquido": alcance_liquido,
+            "Total a Pagar": total_a_pagar,
+            "Costo Empresa": costo_real_empresa,
+            "Dias_Falta": dias_falta,
+            "Horas_Atraso": horas_atraso,
+            "Dcto_Atraso_Monto": dcto_atrasos
         })
     return pd.DataFrame(resultados), costo_empresa_total
 
 def num2words(n):
-    if n == 0: return "CERO"
+    if n <= 0: return "CERO"
     unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE", "VEINTE", "VEINTIUN", "VEINTIDOS", "VEINTITRES", "VEINTICUATRO", "VEINTICINCO", "VEINTISEIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE"]
     decenas = ["", "DIEZ", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
     centenas = ["", "CIEN", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
 
     if n < 30: return unidades[n]
-    if n < 100:
-        return decenas[n // 10] + (" Y " + unidades[n % 10] if n % 10 != 0 else "")
+    if n < 100: return decenas[n // 10] + (" Y " + unidades[n % 10] if n % 10 != 0 else "")
     if n < 1000:
         if n == 100: return "CIEN"
         return (centenas[n // 100] if n // 100 != 1 else "CIENTO") + (" " + num2words(n % 100) if n % 100 != 0 else "")
-    if n < 2000:
-        return "MIL" + (" " + num2words(n % 1000) if n % 1000 != 0 else "")
-    if n < 1000000:
-        return num2words(n // 1000) + " MIL" + (" " + num2words(n % 1000) if n % 1000 != 0 else "")
+    if n < 2000: return "MIL" + (" " + num2words(n % 1000) if n % 1000 != 0 else "")
+    if n < 1000000: return num2words(n // 1000) + " MIL" + (" " + num2words(n % 1000) if n % 1000 != 0 else "")
     if n == 1000000: return "UN MILLON"
-    if n < 2000000:
-        return "UN MILLON " + num2words(n % 1000000)
+    if n < 2000000: return "UN MILLON " + num2words(n % 1000000)
     return num2words(n // 1000000) + " MILLONES " + num2words(n % 1000000)
 
-
-# ==========================================
-# MOTOR DE COORDENADAS: CLON EXACTO DEL WORD (MARZO 2026) CON RECUADROS
-# ==========================================
 def right_text(pdf, x, y, text):
-    """Alinea textos perfectamente a la derecha"""
+    """Alinea textos perfectamente a la derecha en la coordenada indicada"""
     width = pdf.get_string_width(text)
     pdf.text(x - width, y, text)
 
+
+# ==========================================
+# MOTOR PDF: LÍNEAS, CELDAS Y TODOS LOS DATOS
+# ==========================================
 def generar_pdf_liquidacion(datos):
     pdf = FPDF(unit='mm', format='A4')
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # 1. ENCABEZADO Y TÍTULO
+    # 1. ENCABEZADO
     pdf.set_font("Arial", 'B', 10)
     pdf.text(10, 15, "VOLTIFY SPA")
     pdf.set_font("Arial", '', 9)
-    pdf.text(10, 20, "RUT : 77.871.702-6 JAVIERA CARRERA #1150 ARICA")
-    pdf.text(10, 25, "Teléfono Cel 995635899")
+    pdf.text(10, 20, "RUT : 77.871.702-6")
+    pdf.text(10, 25, "JAVIERA CARRERA #1150 ARICA")
+    pdf.text(10, 30, "Teléfono Cel 995635899")
     
     pdf.set_font("Arial", 'B', 12)
-    pdf.text(120, 20, "Liquidación de Sueldo Mensual")
+    pdf.set_xy(10, 37)
+    pdf.cell(190, 6, "Liquidación de Sueldo Mensual", align='C')
     
-    # 2. RECUADRO DE DATOS DEL TRABAJADOR
-    pdf.rect(10, 30, 190, 25) # Caja contenedora
+    # 2. CAJA DATOS TRABAJADOR
+    y_box1 = 45
+    pdf.rect(10, y_box1, 190, 24)
+    pdf.line(10, y_box1+8, 200, y_box1+8)  # Divisor horizontal 1
+    pdf.line(10, y_box1+16, 200, y_box1+16) # Divisor horizontal 2
     
-    rut_trabajador = datos.get("RUT", "11.111.111-1")
+    rut_trabajador = datos.get("RUT", "Sin Registro")
     trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
     cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
-    
     meses_str = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
     mes_actual = meses_str[datetime.datetime.now().month - 1]
     anio_actual = datetime.datetime.now().year
     
-    # Fila 1 de datos
+    # Fila 1 - Caja Superior
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(12, 35, "RUT:")
+    pdf.text(12, y_box1+5, "RUT:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(25, 35, rut_trabajador)
+    pdf.text(22, y_box1+5, rut_trabajador)
     
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(60, 35, "Nombre:")
+    pdf.text(55, y_box1+5, "Nombre:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(75, 35, trabajador_limpio)
+    pdf.text(72, y_box1+5, trabajador_limpio)
     
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(150, 35, "Fecha Contrato:")
+    pdf.text(145, y_box1+5, "Fecha Contrato:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(175, 35, ": 16/03/2026") # Ajustable según BD
+    pdf.text(172, y_box1+5, "01/01/2026") # Fijo referencial
     
-    # Fila 2 de datos
+    # Fila 2 - Caja Superior
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(12, 42, "Año:")
+    pdf.text(12, y_box1+13, "Año:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(25, 42, str(anio_actual))
-    
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(40, 42, "Mes:")
-    pdf.set_font("Arial", '', 9)
-    pdf.text(50, 42, mes_actual)
+    pdf.text(22, y_box1+13, str(anio_actual))
     
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(75, 42, "CC:")
+    pdf.text(40, y_box1+13, "Mes:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(85, 42, "OPERACIONES")
+    pdf.text(50, y_box1+13, mes_actual)
     
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(120, 42, "Sueldo Base:")
+    pdf.text(75, y_box1+13, "CC:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(140, 42, formato_clp(datos["Sueldo Base"]).replace("$","").strip())
+    pdf.text(85, y_box1+13, "OPERACIONES")
     
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(165, 42, "UF:")
+    pdf.text(120, y_box1+13, "Sueldo Base:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(175, 42, "39.841,72")
+    pdf.text(142, y_box1+13, formato_clp(datos["Sueldo Base"]).replace("$","").strip())
     
-    # Fila 3 de datos
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(12, 49, "Cargo:")
+    pdf.text(165, y_box1+13, "UF:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(25, 49, cargo_limpio)
+    pdf.text(172, y_box1+13, "39.841,72")
+    
+    # Fila 3 - Caja Superior
+    pdf.set_font("Arial", 'B', 9)
+    pdf.text(12, y_box1+21, "Cargo:")
+    pdf.set_font("Arial", '', 9)
+    pdf.text(25, y_box1+21, cargo_limpio)
     
     # 3. TABLA PRINCIPAL (HABERES Y DESCUENTOS)
-    y_t = 60
-    pdf.rect(10, y_t, 190, 115) # Caja principal
-    pdf.line(105, y_t, 105, y_t + 115) # Divisor vertical
-    pdf.line(10, y_t + 7, 200, y_t + 7) # Subrayado de títulos
+    y_t = 75
+    h_table = 110
+    pdf.rect(10, y_t, 190, h_table) # Caja principal
+    pdf.line(105, y_t, 105, y_t + h_table) # Línea divisoria central
+    pdf.line(10, y_t + 7, 200, y_t + 7) # Línea debajo de los Títulos
     
     pdf.set_font("Arial", 'B', 10)
     pdf.text(45, y_t + 5, "HABERES")
     pdf.text(140, y_t + 5, "DESCUENTOS")
     
-    pdf.set_font("Arial", '', 9)
-    
-    dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
-    sueldo_prop = datos["Sueldo Base"] / 30 * dias_trabajados
-    
     # --- Columna Izquierda (Haberes) ---
-    y_h = y_t + 13
+    pdf.set_font("Arial", '', 9)
+    y_h = y_t + 12
+    dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
     pdf.text(12, y_h, f"Días Trabajados: {dias_trabajados},00")
-    pdf.text(60, y_h, "Sueldo:")
-    right_text(pdf, 102, y_h, formato_clp(sueldo_prop).replace("$","").strip())
     
     y_h += 6
-    pdf.text(12, y_h, "Horas : 0.0     50.00%")
-    pdf.text(60, y_h, "Total Horas Extras:")
-    right_text(pdf, 102, y_h, formato_clp(datos["Horas Extras"]).replace("$","").strip())
+    pdf.text(12, y_h, "Sueldo:")
+    right_text(pdf, 102, y_h, formato_clp(datos["Sueldo Proporcional"]).replace("$","").strip())
     
+    if datos["Horas Extras Qty"] > 0:
+        y_h += 6
+        pdf.text(12, y_h, f"Horas : {datos['Horas Extras Qty']}   50.00%")
+        y_h += 5
+        pdf.text(12, y_h, "Total Horas Extras:")
+        right_text(pdf, 102, y_h, formato_clp(datos["Horas Extras Monto"]).replace("$","").strip())
+        
     y_h += 6
-    pdf.text(60, y_h, "Gratificación:")
+    pdf.text(12, y_h, "Gratificación:")
     right_text(pdf, 102, y_h, formato_clp(datos["Gratificacion"]).replace("$","").strip())
     
-    y_h += 8
-    pdf.line(10, y_h - 4, 105, y_h - 4) # Divisor interno
+    y_h += 6
+    pdf.line(10, y_h+1, 105, y_h+1) # Línea de subtotal
+    y_h += 6
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(60, y_h, "Total Imponible:")
+    pdf.text(12, y_h, "Total Imponible:")
     right_text(pdf, 102, y_h, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
     
-    y_h += 8
+    y_h += 6
     pdf.text(12, y_h, "Cargas:")
-    
-    y_h += 6
-    pdf.text(60, y_h, "Asignación Movilización:")
-    right_text(pdf, 102, y_h, formato_clp(datos["Movilizacion"]).replace("$","").strip())
-    
-    y_h += 6
-    pdf.text(60, y_h, "Asignación Colación:")
-    right_text(pdf, 102, y_h, formato_clp(datos["Colacion"]).replace("$","").strip())
-    
-    y_h = y_t + 110
-    pdf.line(10, y_h - 4, 105, y_h - 4)
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(60, y_h, "TOTAL HABERES:")
-    right_text(pdf, 102, y_h, formato_clp(datos["Total Haberes"]).replace("$","").strip())
-    pdf.set_font("Arial", '', 9)
-    
+    if datos["Movilizacion"] > 0:
+        y_h += 6
+        pdf.text(15, y_h, "Asignación Movilización:")
+        right_text(pdf, 102, y_h, formato_clp(datos["Movilizacion"]).replace("$","").strip())
+    if datos["Colacion"] > 0:
+        y_h += 6
+        pdf.text(15, y_h, "Asignación Colación:")
+        right_text(pdf, 102, y_h, formato_clp(datos["Colacion"]).replace("$","").strip())
+
     # --- Columna Derecha (Descuentos) ---
-    afp_nombre = datos["Nombre AFP"].split('(')[0].strip()
+    afp_nombre = datos["Nombre AFP"].split('(')[0].strip().upper()
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
     
-    y_d = y_t + 13
-    pdf.text(107, y_d, f"AFP: {afp_nombre}")
-    pdf.text(145, y_d, "Base AFP:")
-    pdf.text(165, y_d, afp_tasa)
-    right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
+    y_d = y_t + 12
+    pdf.text(107, y_d, f"AFP:   {afp_nombre}  ({afp_tasa})")
     
     y_d += 6
-    pdf.text(145, y_d, "Cotización AFP:")
+    pdf.text(112, y_d, "Base AFP:")
+    right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
+    
+    y_d += 5
+    pdf.text(112, y_d, "Cotización AFP:")
     right_text(pdf, 198, y_d, formato_clp(datos["Dcto AFP"]).replace("$","").strip())
     
     y_d += 6
-    pdf.text(107, y_d, "Isapre: Fonasa")
+    pdf.text(107, y_d, "Isapre:   Fonasa")
     
     y_d += 6
-    pdf.text(107, y_d, "7% Obligatorio:")
+    pdf.text(112, y_d, "7% Obligatorio:")
     right_text(pdf, 198, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip())
     
-    y_d += 6
-    pdf.text(107, y_d, "Cotización Pactado:")
-    pdf.text(145, y_d, "0 UF")
+    y_d += 5
+    pdf.text(112, y_d, "Cotización Pactado (0 UF):")
     right_text(pdf, 198, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip())
     
+    if datos["Dcto Cesantia"] > 0:
+        y_d += 6
+        pdf.text(112, y_d, "Base AFC:")
+        right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
+        y_d += 5
+        pdf.text(112, y_d, "Cotización AFC Trabajador:")
+        right_text(pdf, 198, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
+
     y_d += 6
-    pdf.text(145, y_d, "Base AFC:")
-    right_text(pdf, 198, y_d, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
-    
+    pdf.line(105, y_d+1, 200, y_d+1) # Línea de subtotal
     y_d += 6
-    pdf.text(145, y_d, "Cotización AFC Trabajador:")
-    right_text(pdf, 198, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
-    
-    y_d += 8
-    pdf.line(105, y_d - 4, 200, y_d - 4)
     pdf.set_font("Arial", 'B', 9)
-    pdf.text(145, y_d, "Total Previsión:")
-    right_text(pdf, 198, y_d, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
+    pdf.text(107, y_d, "Total Previsión:")
+    right_text(pdf, 198, y_d, formato_clp(datos["Total Prevision"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
     
-    y_d += 8
-    pdf.text(107, y_d, "Días no Trabajador")
+    if datos["Horas_Atraso"] > 0:
+        y_d += 6
+        pdf.text(107, y_d, f"Atraso ( {datos['Horas_Atraso']} Horas )")
+        right_text(pdf, 150, y_d, f"(-{int(datos['Dcto_Atraso_Monto'])})")
+        
+    y_d += 6
+    pdf.text(107, y_d, "Días no Trabajados:")
+    pdf.text(140, y_d, f"Faltas: {int(datos['Dias_Falta'])}")
+    pdf.text(165, y_d, "Licencia: 0")
     
     y_d += 6
-    pdf.text(107, y_d, "Licencia:")
-    
-    y_d += 6
-    pdf.text(107, y_d, "Faltas:")
-    pdf.text(125, y_d, str(int(datos.get("Dias_Falta", 0))))
-    
-    y_d += 6
-    pdf.text(145, y_d, "Base Tributable:")
-    base_trib = datos["Imponible Calculado"] - datos["Descuentos Ley"]
+    pdf.text(107, y_d, "Base Tributable:")
+    base_trib = datos["Imponible Calculado"] - datos["Total Prevision"]
     if base_trib < 0: base_trib = 0
     right_text(pdf, 198, y_d, formato_clp(base_trib).replace("$","").strip())
     
-    y_d = y_t + 110
-    pdf.line(105, y_d - 4, 200, y_d - 4)
-    pdf.set_font("Arial", 'B', 9)
-    pdf.text(145, y_d, "TOTAL DESCUENTO")
-    right_text(pdf, 198, y_d, formato_clp(datos["Descuentos Ley"]).replace("$","").strip())
-    
-    # 4. RECUADRO ALCANCE LÍQUIDO
-    y_l = 180
-    pdf.rect(140, y_l, 60, 16) # Caja de resumen
+    if datos["Anticipo"] > 0:
+        y_d += 6
+        pdf.text(107, y_d, "Anticipo:")
+        right_text(pdf, 198, y_d, formato_clp(datos["Anticipo"]).replace("$","").strip())
+        
+    # 4. CELDA DE TOTALES HABERES Y DESCUENTOS
+    y_tot = y_t + h_table
+    pdf.rect(10, y_tot, 190, 8) 
+    pdf.line(105, y_tot, 105, y_tot + 8)
     
     pdf.set_font("Arial", 'B', 10)
-    pdf.text(142, y_l + 6, "ALCANCE LIQUIDO")
-    right_text(pdf, 198, y_l + 6, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
+    pdf.text(12, y_tot + 5, "TOTAL HABERES:")
+    right_text(pdf, 102, y_tot + 5, formato_clp(datos["Total Haberes"]).replace("$","").strip())
     
-    pdf.text(142, y_l + 13, "TOTAL A PAGAR")
-    right_text(pdf, 198, y_l + 13, formato_clp(datos["Líquido a Pagar"]).replace("$","").strip())
+    pdf.text(107, y_tot + 5, "TOTAL DESCUENTO:")
+    right_text(pdf, 198, y_tot + 5, formato_clp(datos["Total Descuentos"]).replace("$","").strip())
     
-    # 5. TEXTO EN PALABRAS, DECLARACIÓN Y FIRMAS
-    y_text = 205
+    # 5. CAJA ALCANCE LÍQUIDO Y PAGO
+    y_alc = y_tot + 12
+    pdf.rect(120, y_alc, 80, 16)
+    pdf.line(120, y_alc+8, 200, y_alc+8)
+    
+    pdf.set_font("Arial", 'B', 10)
+    pdf.text(122, y_alc + 5, "ALCANCE LIQUIDO:")
+    right_text(pdf, 198, y_alc + 5, formato_clp(datos["Alcance Liquido"]).replace("$","").strip())
+    
+    pdf.text(122, y_alc + 13, "TOTAL A PAGAR:")
+    right_text(pdf, 198, y_alc + 13, formato_clp(datos["Total a Pagar"]).replace("$","").strip())
+    
+    # 6. FOOTER (PALABRAS Y FIRMAS)
+    y_palabras = y_alc + 20
     pdf.set_font("Arial", '', 9)
-    pdf.text(10, y_text, "Certifico que he recibido conforme y no tengo cargos ni")
-    pdf.text(10, y_text + 5, "cobro alguno posterior que hacer, por ninguno de los")
-    pdf.text(10, y_text + 10, "conceptos comprometidos en ella.")
+    texto_son = num2words(int(datos['Total a Pagar'])).upper()
+    pdf.text(10, y_palabras, f"SON: {texto_son} PESOS")
     
+    y_palabras += 10
+    pdf.text(10, y_palabras, "Certifico que he recibido conforme y no tengo cargos ni cobro alguno posterior que hacer, por ninguno de los")
+    pdf.text(10, y_palabras + 4, "conceptos comprometidos en ella.")
+    
+    y_firmas = y_palabras + 25
+    pdf.line(10, y_firmas, 80, y_firmas)
+    pdf.line(120, y_firmas, 190, y_firmas)
     pdf.set_font("Arial", 'B', 9)
-    pdf.line(40, y_text + 26, 90, y_text + 26)
-    pdf.text(50, y_text + 30, "FIRMA TRABAJADOR")
+    pdf.text(25, y_firmas + 4, "FIRMA TRABAJADOR")
+    pdf.text(135, y_firmas + 4, "FIRMA EMPLEADOR")
     
-    pdf.set_font("Arial", '', 9)
-    texto_son = num2words(int(datos['Líquido a Pagar'])).upper()
-    pdf.text(10, y_text + 45, f"SON: {texto_son} PESOS")
-    
+    y_final = y_firmas + 15
     pdf.set_font("Arial", '', 8)
-    pdf.text(10, y_text + 55, "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador.")
+    pdf.text(10, y_final, "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador.")
     
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
@@ -544,6 +585,12 @@ st.divider()
 # ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
+def limpiar_form_nomina():
+    st.session_state.form_id_nomina += 1
+
+if 'form_id_nomina' not in st.session_state:
+    st.session_state.form_id_nomina = 0
+
 if st.session_state.menu_actual == "Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
     if st.session_state.acceso_finanzas == "ninguno":
@@ -566,70 +613,104 @@ if st.session_state.menu_actual == "Finanzas":
             with st.container(border=True):
                 st.subheader("Control de Asistencia y Nómina")
                 if st.session_state.acceso_finanzas == "admin":
-                    with st.expander("➕ Ingresar Nuevo Trabajador", expanded=False):
-                        colA, colB, colC = st.columns(3)
-                        n_trabajador = colA.text_input("Nombre Completo")
-                        n_cargo = colB.text_input("Cargo")
+                    with st.expander("➕ Ingresar Nuevo Trabajador (Datos Fijos)", expanded=False):
+                        fid = st.session_state.form_id_nomina
                         
-                        if 'input_sueldo_base' not in st.session_state: st.session_state['input_sueldo_base'] = "0"
-                        colC.text_input("Sueldo Base Mensual", key="input_sueldo_base", on_change=formatear_input, kwargs={'llave': 'input_sueldo_base'})
-                        n_sueldo = float(st.session_state['input_sueldo_base'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        colRUT, colA, colB = st.columns([1, 2, 2])
+                        n_rut = colRUT.text_input("RUT (Ej: 12.345.678-9)", key=f"n_rut_{fid}")
+                        n_trabajador = colA.text_input("Nombre Completo", key=f"n_trab_{fid}")
+                        n_cargo = colB.text_input("Cargo", key=f"n_cargo_{fid}")
                         
-                        colD, colE = st.columns(2)
-                        n_jornada = colD.number_input("Horas Semanales (Jornada)", value=44, max_value=45)
-                        n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"])
+                        llave_sueldo = f"sueldo_{fid}"
+                        if llave_sueldo not in st.session_state: st.session_state[llave_sueldo] = "0"
+                        
+                        colC, colD, colE = st.columns([2, 1, 2])
+                        colC.text_input("Sueldo Base Mensual", key=llave_sueldo, on_change=formatear_input, kwargs={'llave': llave_sueldo})
+                        n_sueldo = float(st.session_state[llave_sueldo].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        
+                        n_jornada = colD.number_input("Hrs Semanales", value=44, max_value=45, key=f"n_jor_{fid}")
+                        n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"], key=f"n_gra_{fid}")
                         
                         colF, colG = st.columns(2)
-                        n_contrato = colF.selectbox("Tipo de Contrato", ["Indefinido", "Plazo Fijo"])
-                        n_afp = colG.selectbox("Seleccione AFP", list(TASAS_AFP.keys()))
+                        n_contrato = colF.selectbox("Tipo de Contrato", ["Indefinido", "Plazo Fijo"], key=f"n_con_{fid}")
+                        n_afp = colG.selectbox("Seleccione AFP", list(TASAS_AFP.keys()), key=f"n_afp_{fid}")
+                        
+                        llave_col = f"colacion_{fid}"
+                        llave_mov = f"movilizacion_{fid}"
+                        if llave_col not in st.session_state: st.session_state[llave_col] = "0"
+                        if llave_mov not in st.session_state: st.session_state[llave_mov] = "0"
                         
                         colH, colI = st.columns(2)
-                        if 'input_colacion' not in st.session_state: st.session_state['input_colacion'] = "0"
-                        if 'input_movilizacion' not in st.session_state: st.session_state['input_movilizacion'] = "0"
-                        colH.text_input("Bono Colación (Opcional)", key="input_colacion", on_change=formatear_input, kwargs={'llave': 'input_colacion'})
-                        n_cola = float(st.session_state['input_colacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-                        colI.text_input("Bono Movilización (Opcional)", key="input_movilizacion", on_change=formatear_input, kwargs={'llave': 'input_movilizacion'})
-                        n_movi = float(st.session_state['input_movilizacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        colH.text_input("Bono Colación Fijo", key=llave_col, on_change=formatear_input, kwargs={'llave': llave_col})
+                        n_cola = float(st.session_state[llave_col].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        colI.text_input("Bono Movilización Fijo", key=llave_mov, on_change=formatear_input, kwargs={'llave': llave_mov})
+                        n_movi = float(st.session_state[llave_mov].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                         
-                        if st.button("Guardar Perfil"):
-                            if n_trabajador:
-                                nuevo_perfil = pd.DataFrame([{
-                                    "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
-                                    "Jornada_Hrs": n_jornada, "Tipo_Contrato": n_contrato, "Gratificacion": n_grati, 
-                                    "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
-                                    "Colacion": n_cola, "Movilizacion": n_movi
-                                }])
-                                st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
-                                guardar_datos("Nomina_Personal", st.session_state.nomina)
-                                st.success("Trabajador registrado exitosamente.")
+                        st.write("")
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("💾 Guardar Perfil Fijo", type="primary", use_container_width=True):
+                                if n_trabajador and n_rut:
+                                    nuevo_perfil = pd.DataFrame([{
+                                        "RUT": n_rut, "Trabajador": n_trabajador, "Cargo": n_cargo, "Sueldo_Base": n_sueldo, 
+                                        "Jornada_Hrs": n_jornada, "Tipo_Contrato": n_contrato, "Gratificacion": n_grati, 
+                                        "AFP": n_afp, "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, 
+                                        "Colacion": n_cola, "Movilizacion": n_movi, "Anticipo": 0
+                                    }])
+                                    st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
+                                    guardar_datos("Nomina_Personal", st.session_state.nomina)
+                                    limpiar_form_nomina()
+                                    st.success("Trabajador registrado exitosamente.")
+                                    st.rerun()
+                                else:
+                                    st.error("⚠️ El RUT y el Nombre Completo son obligatorios.")
+                        with col_btn2:
+                            if st.button("🧹 Limpiar Campos", use_container_width=True):
+                                limpiar_form_nomina()
                                 st.rerun()
 
-                    st.caption("Modifique datos interactivos directamente en la tabla:")
+                    st.caption("Modifique las variables del mes directamente en la tabla (Anticipo y Faltas están junto al Sueldo):")
                     df_nomina_edit = st.data_editor(
                         st.session_state.nomina,
                         column_config={
+                            "RUT": None, 
                             "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, format="%,d"),
                             "Colacion": st.column_config.NumberColumn("Colación", min_value=0, format="%,d"),
                             "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, format="%,d"),
                             "Tipo_Contrato": st.column_config.SelectboxColumn("Contrato", options=["Indefinido", "Plazo Fijo"]),
                             "Gratificacion": st.column_config.SelectboxColumn("Gratificación", options=["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"]),
                             "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
+                            "Dias_Falta": st.column_config.NumberColumn("Días Falta", min_value=0),
+                            "Horas_Atraso": st.column_config.NumberColumn("Hrs Atraso", min_value=0),
+                            "Horas_Extras": st.column_config.NumberColumn("Hrs Extras", min_value=0),
+                            "Anticipo": st.column_config.NumberColumn("Anticipo ($)", min_value=0, format="%,d"),
                         },
+                        column_order=["Trabajador", "Cargo", "Sueldo_Base", "Anticipo", "Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Jornada_Hrs", "Gratificacion", "AFP", "Tipo_Contrato"],
                         num_rows="dynamic", use_container_width=True, key="ed_nomina"
                     )
-                    if st.button("💾 Guardar Cambios de Nómina", type="primary"):
+                    if st.button("💾 Guardar Cambios de Nómina / Mes", type="primary"):
                         st.session_state.nomina = df_nomina_edit
                         guardar_datos("Nomina_Personal", st.session_state.nomina)
                         st.success("Nómina actualizada.")
+                        
+                    with st.expander("🗑️ Dar de Baja / Eliminar Trabajador"):
+                        lista_trabajadores = st.session_state.nomina['Trabajador'].tolist()
+                        if lista_trabajadores:
+                            trab_a_borrar = st.selectbox("Selecciona el trabajador a eliminar:", lista_trabajadores)
+                            if st.button("Eliminar Definitivamente", type="primary"):
+                                st.session_state.nomina = st.session_state.nomina[st.session_state.nomina['Trabajador'] != trab_a_borrar].reset_index(drop=True)
+                                guardar_datos("Nomina_Personal", st.session_state.nomina)
+                                st.success(f"Trabajador {trab_a_borrar} dado de baja exitosamente.")
+                                st.rerun()
                 else:
-                    st.dataframe(st.session_state.nomina, use_container_width=True)
+                    st.dataframe(st.session_state.nomina.drop(columns=["RUT"], errors='ignore'), use_container_width=True)
 
             with st.container(border=True):
                 st.subheader("Proyección de Liquidaciones")
                 df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
                 
-                df_liq_visual = df_liquidaciones[["Trabajador", "Cargo", "Contrato", "Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]].copy()
-                for col in ["Imponible Calculado", "Haberes No Imponibles", "Descuentos Ley", "Líquido a Pagar", "Costo Empresa"]:
+                df_liq_visual = df_liquidaciones[["Trabajador", "Cargo", "Imponible Calculado", "Total Prevision", "Anticipo", "Total a Pagar", "Costo Empresa"]].copy()
+                for col in ["Imponible Calculado", "Total Prevision", "Anticipo", "Total a Pagar", "Costo Empresa"]:
                     df_liq_visual[col] = df_liq_visual[col].apply(formato_clp)
                     
                 st.dataframe(df_liq_visual, use_container_width=True)
@@ -641,7 +722,7 @@ if st.session_state.menu_actual == "Finanzas":
                     trab_lista = df_liquidaciones['Trabajador'].tolist()
                     if trab_lista:
                         col_sel, col_btn = st.columns([3, 1], vertical_alignment="bottom")
-                        trab_seleccionado = col_sel.selectbox("Seleccione un trabajador:", trab_lista)
+                        trab_seleccionado = col_sel.selectbox("Seleccione un trabajador para generar documento:", trab_lista)
                         datos_trabajador_pdf = df_liquidaciones[df_liquidaciones['Trabajador'] == trab_seleccionado].iloc[0]
                         pdf_generado_bytes = generar_pdf_liquidacion(datos_trabajador_pdf)
                         col_btn.download_button(
