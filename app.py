@@ -258,13 +258,14 @@ def right_text(pdf, x, y, text):
     pdf.text(x - width, y, text)
 
 # ==========================================
-# MOTOR PDF
+# MOTOR PDF: CLON LITERAR DEL DOCUMENTO WORD (SIN CAJAS)
 # ==========================================
 def generar_pdf_liquidacion(datos):
     pdf = FPDF(unit='mm', format='A4')
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
+    # 1. ENCABEZADO SUPERIOR
     pdf.set_font("Arial", 'B', 10)
     pdf.text(10, 15, "VOLTIFY SPA")
     pdf.set_font("Arial", '', 9)
@@ -275,6 +276,7 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", 'B', 12)
     pdf.text(70, 40, "Liquidación de Sueldo Mensual")
     
+    # 2. BLOQUE DE INFORMACIÓN DEL TRABAJADOR
     y = 50
     trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
     cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
@@ -287,20 +289,26 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 9)
     pdf.text(10, y, "RUT:")
     pdf.text(25, y, rut_trabajador)
+    
     pdf.text(60, y, "Nombre:")
     pdf.text(75, y, trabajador_limpio)
+    
     pdf.text(145, y, "Fecha Contrato :")
     pdf.text(172, y, "16/03/2026")
     
     y += 6
     pdf.text(10, y, "Año:")
     pdf.text(20, y, str(anio_actual))
+    
     pdf.text(35, y, "Mes:")
     pdf.text(45, y, mes_actual)
+    
     pdf.text(65, y, "CC:")
     pdf.text(75, y, "OPERACIONES")
+    
     pdf.text(110, y, "Sueldo Base:")
     pdf.text(130, y, formato_clp(datos["Sueldo Base"]).replace("$","").strip())
+    
     pdf.text(155, y, "UF:")
     pdf.text(165, y, "39.841,72")
     
@@ -308,6 +316,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(10, y, "Cargo:")
     pdf.text(25, y, cargo_limpio)
 
+    # 3. TÍTULOS DE COLUMNAS
     y += 10
     pdf.set_font("Arial", 'B', 9)
     pdf.text(10, y, "HABERES")
@@ -317,7 +326,7 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 9)
     y_start_cols = y
 
-    # --- Columna Izquierda ---
+    # --- COLUMNA IZQUIERDA (HABERES) ---
     y_l = y_start_cols
     dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
     pdf.text(10, y_l, f"Días Trabajados: {dias_trabajados},00")
@@ -357,7 +366,7 @@ def generar_pdf_liquidacion(datos):
     right_text(pdf, 95, y_l, formato_clp(datos["Total Haberes"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
 
-    # --- Columna Derecha ---
+    # --- COLUMNA DERECHA (DESCUENTOS) ---
     y_r = y_start_cols
     afp_nombre = datos["Nombre AFP"].split('(')[0].strip().upper()
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
@@ -423,6 +432,7 @@ def generar_pdf_liquidacion(datos):
         pdf.text(130, y_r, "Anticipo:")
         right_text(pdf, 195, y_r, formato_clp(datos["Anticipo"]).replace("$","").strip())
 
+    # --- 4. TOTALES FINALES ---
     y_tot = max(y_l, y_r) + 15
     pdf.set_font("Arial", 'B', 9)
     
@@ -437,6 +447,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(110, y_tot, "TOTAL A PAGAR")
     right_text(pdf, 195, y_tot, formato_clp(datos["Total a Pagar"]).replace("$","").strip())
     
+    # --- 5. TEXTO EN PALABRAS Y LEGAL ---
     y_words = y_tot + 10
     pdf.set_font("Arial", '', 9)
     texto_son = num2words(int(datos['Total a Pagar'])).upper()
@@ -453,6 +464,7 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 8)
     pdf.text(10, y_firm + 10, "La presente liquidación se emite en 2 copias quedando una en poder del trabajador y otra en poder del empleador.")
     
+    # Render final
     temp_path = tempfile.mktemp(suffix=".pdf")
     pdf.output(temp_path)
     with open(temp_path, "rb") as f: pdf_bytes = f.read()
@@ -500,7 +512,7 @@ if not st.session_state.acceso_app:
     st.stop()
 
 # ==========================================
-# 5. NAVEGACIÓN SUPERIOR (ACTUALIZADA: INICIO)
+# 5. NAVEGACIÓN SUPERIOR
 # ==========================================
 if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Inicio"
 
@@ -529,7 +541,6 @@ with col_settings:
 
 st.write("") 
 
-# Añadimos el botón "Inicio" a la botonera
 b0, b1, b2, b3, b4, b5, b6 = st.columns(7)
 
 if b0.button("🏠 Inicio", type="primary" if st.session_state.menu_actual == "Inicio" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inicio"; st.rerun()
@@ -549,12 +560,9 @@ if st.session_state.menu_actual == "Inicio":
     st.markdown("## 📊 Panel de Control General")
     st.caption("Visión global del estado de Voltify SpA.")
     
-    # Cálculos rápidos
     total_trabajadores = len(st.session_state.nomina)
-    
     presupuestos_pendientes = st.session_state.presupuestos[st.session_state.presupuestos['Aprobacion'] == '⏳ Pendiente']['Monto'].sum()
     if pd.isna(presupuestos_pendientes): presupuestos_pendientes = 0
-        
     proyectos_activos = len(st.session_state.proyectos_resumen)
     
     colA, colB, colC = st.columns(3)
@@ -806,7 +814,6 @@ elif st.session_state.menu_actual == "Presupuestos":
             fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY")
             
             colP5, colP6, colP7 = st.columns(3)
-            # SEMÁFOROS APLICADOS
             aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada"])
             orden_pres = colP6.selectbox("Respaldo de Orden:", ["Sin Orden", "Con Orden"])
             num_oc_pres = colP7.text_input("N° OC (Si aplica):", placeholder="Ej: OC-1234")
@@ -1117,17 +1124,34 @@ elif st.session_state.menu_actual == "Operaciones":
                             st.rerun()
                         else: st.error("Escribe una descripción para la tarea.")
 
-                mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
-                df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
+                # OBTENER TODAS LAS TAREAS DEL PROYECTO
+                mask_tareas_proyecto = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+                df_todas_las_tareas_proyecto = st.session_state.proyectos_tareas[mask_tareas_proyecto].copy()
                 
-                if df_tareas_filtradas.empty:
+                if df_todas_las_tareas_proyecto.empty:
                     st.info("No hay tareas registradas para este proyecto.")
                 else:
-                    df_tareas_filtradas['Fecha_Inicio'] = pd.to_datetime(df_tareas_filtradas['Fecha_Inicio'], errors='coerce').dt.date
-                    df_tareas_filtradas['Fecha_Termino'] = pd.to_datetime(df_tareas_filtradas['Fecha_Termino'], errors='coerce').dt.date
+                    # --- NUEVO: FILTRO ESTILO MONDAY ---
+                    st.write("")
+                    col_filt1, col_filt2 = st.columns([1, 3])
+                    trabajadores_con_tareas = df_todas_las_tareas_proyecto['Trabajador'].unique().tolist()
+                    filtro_trabajador = col_filt1.selectbox("🔍 Filtrar vista por:", ["👥 Todos los trabajadores"] + trabajadores_con_tareas)
+                    
+                    if filtro_trabajador != "👥 Todos los trabajadores":
+                        df_vista_filtrada = df_todas_las_tareas_proyecto[df_todas_las_tareas_proyecto['Trabajador'] == filtro_trabajador].copy()
+                        # Si editamos la vista filtrada, al guardar solo reemplazaremos las tareas de ESTE proyecto Y ESTE trabajador
+                        mask_reemplazo = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Trabajador"] == filtro_trabajador)
+                    else:
+                        df_vista_filtrada = df_todas_las_tareas_proyecto.copy()
+                        # Si no hay filtro, al guardar reemplazamos TODAS las tareas del proyecto
+                        mask_reemplazo = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+
+                    # Convertir strings a fechas para el data_editor
+                    df_vista_filtrada['Fecha_Inicio'] = pd.to_datetime(df_vista_filtrada['Fecha_Inicio'], errors='coerce').dt.date
+                    df_vista_filtrada['Fecha_Termino'] = pd.to_datetime(df_vista_filtrada['Fecha_Termino'], errors='coerce').dt.date
 
                     df_tareas_editadas = st.data_editor(
-                        df_tareas_filtradas,
+                        df_vista_filtrada,
                         column_config={
                             "Estado": st.column_config.SelectboxColumn("Estado", options=["🔴 Pendiente", "🟡 En proceso", "🟢 Terminada"]),
                             "Fecha_Inicio": st.column_config.DateColumn("Inicio"),
@@ -1140,14 +1164,16 @@ elif st.session_state.menu_actual == "Operaciones":
                         df_tareas_editadas['Fecha_Inicio'] = df_tareas_editadas['Fecha_Inicio'].astype(str)
                         df_tareas_editadas['Fecha_Termino'] = df_tareas_editadas['Fecha_Termino'].astype(str)
                         
-                        st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
+                        # Borramos SOLO la porción que estábamos viendo (ya sea todo el proyecto o solo lo de un usuario)
+                        st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_reemplazo]
+                        # Concatenamos la porción actualizada
                         st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
                         guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                        st.success("Estados actualizados.")
+                        st.success("Estados actualizados de forma segura.")
                     
                     st.divider()
                     st.markdown("#### 📊 Carta Gantt del Proyecto")
-                    df_gantt = df_tareas_filtradas.copy()
+                    df_gantt = df_vista_filtrada.copy() # El Gantt también se filtra
                     df_gantt['Fecha_Inicio'] = pd.to_datetime(df_gantt['Fecha_Inicio'], errors='coerce')
                     df_gantt['Fecha_Termino'] = pd.to_datetime(df_gantt['Fecha_Termino'], errors='coerce')
                     df_gantt = df_gantt.dropna(subset=['Fecha_Inicio', 'Fecha_Termino'])
@@ -1168,11 +1194,15 @@ elif st.session_state.menu_actual == "Operaciones":
                         st.caption("No hay tareas con fechas válidas para mostrar en la Carta Gantt.")
 
                     with st.expander("🗑️ Eliminar una Tarea"):
-                        lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
+                        # Mostramos el nombre de la tarea JUNTO al trabajador para no borrar la incorrecta
+                        lista_nombres_tareas = [f"{row['Tarea']} ({row['Trabajador']})" for index, row in df_vista_filtrada.iterrows()]
                         if lista_nombres_tareas:
                             tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
                             if st.button("Eliminar Tarea Seleccionada"):
-                                mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
+                                nombre_tarea = tarea_a_eliminar.rsplit(" (", 1)[0]
+                                nombre_trab = tarea_a_eliminar.rsplit(" (", 1)[1].replace(")", "")
+                                
+                                mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == nombre_tarea) & (st.session_state.proyectos_tareas["Trabajador"] == nombre_trab)
                                 st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
                                 guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
                                 st.success("Tarea eliminada.")
