@@ -532,29 +532,9 @@ st.divider()
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
 
-# Funciones de limpieza de formulario
-def limpiar_form_nomina():
-    st.session_state['n_rut_key'] = ""
-    st.session_state['n_trabajador_key'] = ""
-    st.session_state['n_cargo_key'] = ""
-    st.session_state['n_jornada_key'] = 44
-    st.session_state['n_grati_key'] = "Tope Legal Mensual"
-    st.session_state['n_contrato_key'] = "Indefinido"
-    st.session_state['n_afp_key'] = "Habitat (11.27%)"
-    st.session_state['input_sueldo_base'] = "0"
-    st.session_state['input_colacion'] = "0"
-    st.session_state['input_movilizacion'] = "0"
-
-# Inicializar llaves si no existen
-for key in ['n_rut_key', 'n_trabajador_key', 'n_cargo_key']:
-    if key not in st.session_state: st.session_state[key] = ""
-if 'n_jornada_key' not in st.session_state: st.session_state['n_jornada_key'] = 44
-if 'n_grati_key' not in st.session_state: st.session_state['n_grati_key'] = "Tope Legal Mensual"
-if 'n_contrato_key' not in st.session_state: st.session_state['n_contrato_key'] = "Indefinido"
-if 'n_afp_key' not in st.session_state: st.session_state['n_afp_key'] = "Habitat (11.27%)"
-if 'input_sueldo_base' not in st.session_state: st.session_state['input_sueldo_base'] = "0"
-if 'input_colacion' not in st.session_state: st.session_state['input_colacion'] = "0"
-if 'input_movilizacion' not in st.session_state: st.session_state['input_movilizacion'] = "0"
+# --- INICIALIZADOR DEL FORMULARIO DINÁMICO ---
+if 'form_id_nomina' not in st.session_state:
+    st.session_state.form_id_nomina = 0
 
 if st.session_state.menu_actual == "Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
@@ -579,26 +559,38 @@ if st.session_state.menu_actual == "Finanzas":
                 st.subheader("Control de Asistencia y Nómina")
                 if st.session_state.acceso_finanzas == "admin":
                     with st.expander("➕ Ingresar Nuevo Trabajador", expanded=False):
+                        
+                        fid = st.session_state.form_id_nomina
+                        
                         colRUT, colA, colB = st.columns([1, 2, 2])
-                        n_rut = colRUT.text_input("RUT (Ej: 12.345.678-9)", key="n_rut_key")
-                        n_trabajador = colA.text_input("Nombre Completo", key="n_trabajador_key")
-                        n_cargo = colB.text_input("Cargo", key="n_cargo_key")
+                        n_rut = colRUT.text_input("RUT (Ej: 12.345.678-9)", key=f"n_rut_{fid}")
+                        n_trabajador = colA.text_input("Nombre Completo", key=f"n_trab_{fid}")
+                        n_cargo = colB.text_input("Cargo", key=f"n_cargo_{fid}")
+                        
+                        llave_sueldo = f"sueldo_{fid}"
+                        if llave_sueldo not in st.session_state: st.session_state[llave_sueldo] = "0"
                         
                         colC, colD, colE = st.columns([2, 1, 2])
-                        colC.text_input("Sueldo Base Mensual", key="input_sueldo_base", on_change=formatear_input, kwargs={'llave': 'input_sueldo_base'})
-                        n_sueldo = float(st.session_state['input_sueldo_base'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-                        n_jornada = colD.number_input("Hrs Semanales", value=st.session_state['n_jornada_key'], max_value=45, key="n_jornada_key")
-                        n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"], key="n_grati_key")
+                        colC.text_input("Sueldo Base Mensual", key=llave_sueldo, on_change=formatear_input, kwargs={'llave': llave_sueldo})
+                        n_sueldo = float(st.session_state[llave_sueldo].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        
+                        n_jornada = colD.number_input("Hrs Semanales", value=44, max_value=45, key=f"n_jor_{fid}")
+                        n_grati = colE.selectbox("Tipo de Gratificación", ["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"], key=f"n_gra_{fid}")
                         
                         colF, colG = st.columns(2)
-                        n_contrato = colF.selectbox("Tipo de Contrato", ["Indefinido", "Plazo Fijo"], key="n_contrato_key")
-                        n_afp = colG.selectbox("Seleccione AFP", list(TASAS_AFP.keys()), key="n_afp_key")
+                        n_contrato = colF.selectbox("Tipo de Contrato", ["Indefinido", "Plazo Fijo"], key=f"n_con_{fid}")
+                        n_afp = colG.selectbox("Seleccione AFP", list(TASAS_AFP.keys()), key=f"n_afp_{fid}")
+                        
+                        llave_col = f"colacion_{fid}"
+                        llave_mov = f"movilizacion_{fid}"
+                        if llave_col not in st.session_state: st.session_state[llave_col] = "0"
+                        if llave_mov not in st.session_state: st.session_state[llave_mov] = "0"
                         
                         colH, colI = st.columns(2)
-                        colH.text_input("Bono Colación (Opcional)", key="input_colacion", on_change=formatear_input, kwargs={'llave': 'input_colacion'})
-                        n_cola = float(st.session_state['input_colacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
-                        colI.text_input("Bono Movilización (Opcional)", key="input_movilizacion", on_change=formatear_input, kwargs={'llave': 'input_movilizacion'})
-                        n_movi = float(st.session_state['input_movilizacion'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        colH.text_input("Bono Colación (Opcional)", key=llave_col, on_change=formatear_input, kwargs={'llave': llave_col})
+                        n_cola = float(st.session_state[llave_col].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                        colI.text_input("Bono Movilización (Opcional)", key=llave_mov, on_change=formatear_input, kwargs={'llave': llave_mov})
+                        n_movi = float(st.session_state[llave_mov].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
                         
                         st.write("")
                         col_btn1, col_btn2 = st.columns(2)
@@ -613,21 +605,21 @@ if st.session_state.menu_actual == "Finanzas":
                                     }])
                                     st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
                                     guardar_datos("Nomina_Personal", st.session_state.nomina)
-                                    limpiar_form_nomina() # Vaciado automático
+                                    st.session_state.form_id_nomina += 1 # Magia: resetea todo el formulario
                                     st.success("Trabajador registrado exitosamente.")
                                     st.rerun()
                                 else:
                                     st.error("⚠️ El RUT y el Nombre Completo son obligatorios.")
                         with col_btn2:
                             if st.button("🧹 Limpiar Campos", use_container_width=True):
-                                limpiar_form_nomina()
+                                st.session_state.form_id_nomina += 1
                                 st.rerun()
 
                     st.caption("Modifique datos interactivos directamente en la tabla:")
                     df_nomina_edit = st.data_editor(
                         st.session_state.nomina,
                         column_config={
-                            "RUT": None, # El RUT es invisible para el usuario en esta vista general
+                            "RUT": None, # El RUT existe pero es 100% invisible
                             "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, format="%,d"),
                             "Colacion": st.column_config.NumberColumn("Colación", min_value=0, format="%,d"),
                             "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, format="%,d"),
