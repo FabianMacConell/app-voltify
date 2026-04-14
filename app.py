@@ -108,11 +108,12 @@ if 'nomina' not in st.session_state:
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
 
-# GARANTÍA DE RETROCOMPATIBILIDAD NÓMINA
-columnas_obligatorias_nom = ["Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Anticipo"]
-for col in columnas_obligatorias_nom:
+# GARANTÍA DE RETROCOMPATIBILIDAD
+columnas_obligatorias = ["Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Anticipo"]
+for col in columnas_obligatorias:
     if col not in st.session_state.nomina.columns:
         st.session_state.nomina[col] = 0
+
 if 'RUT' not in st.session_state.nomina.columns:
     st.session_state.nomina['RUT'] = "Sin Registro"
 
@@ -133,14 +134,8 @@ if 'proyectos_equipo' not in st.session_state:
     st.session_state.proyectos_equipo = cargar_datos("Proyectos_Equipo", df_equipo_base)
 
 if 'proyectos_tareas' not in st.session_state:
-    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino"])
+    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
-
-# GARANTÍA DE RETROCOMPATIBILIDAD TAREAS (Para la Carta Gantt)
-if 'Fecha_Inicio' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Fecha_Inicio'] = datetime.date.today().strftime('%Y-%m-%d')
-if 'Fecha_Termino' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Fecha_Termino'] = datetime.date.today().strftime('%Y-%m-%d')
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
@@ -255,11 +250,13 @@ def num2words(n):
     return num2words(n // 1000000) + " MILLONES " + num2words(n % 1000000)
 
 def right_text(pdf, x, y, text):
+    """Alinea textos perfectamente a la derecha en la coordenada indicada"""
     width = pdf.get_string_width(text)
     pdf.text(x - width, y, text)
 
+
 # ==========================================
-# MOTOR PDF
+# MOTOR PDF: LÍNEAS, CELDAS Y TODOS LOS DATOS
 # ==========================================
 def generar_pdf_liquidacion(datos):
     pdf = FPDF(unit='mm', format='A4')
@@ -281,8 +278,8 @@ def generar_pdf_liquidacion(datos):
     # 2. CAJA DATOS TRABAJADOR
     y_box1 = 45
     pdf.rect(10, y_box1, 190, 24)
-    pdf.line(10, y_box1+8, 200, y_box1+8) 
-    pdf.line(10, y_box1+16, 200, y_box1+16) 
+    pdf.line(10, y_box1+8, 200, y_box1+8)  # Divisor horizontal 1
+    pdf.line(10, y_box1+16, 200, y_box1+16) # Divisor horizontal 2
     
     rut_trabajador = datos.get("RUT", "Sin Registro")
     trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
@@ -291,6 +288,7 @@ def generar_pdf_liquidacion(datos):
     mes_actual = meses_str[datetime.datetime.now().month - 1]
     anio_actual = datetime.datetime.now().year
     
+    # Fila 1 - Caja Superior
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, y_box1+5, "RUT:")
     pdf.set_font("Arial", '', 9)
@@ -304,8 +302,9 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", 'B', 9)
     pdf.text(145, y_box1+5, "Fecha Contrato:")
     pdf.set_font("Arial", '', 9)
-    pdf.text(172, y_box1+5, "01/01/2026") 
+    pdf.text(172, y_box1+5, "01/01/2026") # Fijo referencial
     
+    # Fila 2 - Caja Superior
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, y_box1+13, "Año:")
     pdf.set_font("Arial", '', 9)
@@ -331,22 +330,24 @@ def generar_pdf_liquidacion(datos):
     pdf.set_font("Arial", '', 9)
     pdf.text(172, y_box1+13, "39.841,72")
     
+    # Fila 3 - Caja Superior
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, y_box1+21, "Cargo:")
     pdf.set_font("Arial", '', 9)
     pdf.text(25, y_box1+21, cargo_limpio)
     
-    # 3. TABLA PRINCIPAL
+    # 3. TABLA PRINCIPAL (HABERES Y DESCUENTOS)
     y_t = 75
     h_table = 110
-    pdf.rect(10, y_t, 190, h_table) 
-    pdf.line(105, y_t, 105, y_t + h_table) 
-    pdf.line(10, y_t + 7, 200, y_t + 7) 
+    pdf.rect(10, y_t, 190, h_table) # Caja principal
+    pdf.line(105, y_t, 105, y_t + h_table) # Línea divisoria central
+    pdf.line(10, y_t + 7, 200, y_t + 7) # Línea debajo de los Títulos
     
     pdf.set_font("Arial", 'B', 10)
     pdf.text(45, y_t + 5, "HABERES")
     pdf.text(140, y_t + 5, "DESCUENTOS")
     
+    # --- Columna Izquierda (Haberes) ---
     pdf.set_font("Arial", '', 9)
     y_h = y_t + 12
     dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
@@ -368,7 +369,7 @@ def generar_pdf_liquidacion(datos):
     right_text(pdf, 102, y_h, formato_clp(datos["Gratificacion"]).replace("$","").strip())
     
     y_h += 6
-    pdf.line(10, y_h+1, 105, y_h+1)
+    pdf.line(10, y_h+1, 105, y_h+1) # Línea de subtotal
     y_h += 6
     pdf.set_font("Arial", 'B', 9)
     pdf.text(12, y_h, "Total Imponible:")
@@ -386,6 +387,7 @@ def generar_pdf_liquidacion(datos):
         pdf.text(15, y_h, "Asignación Colación:")
         right_text(pdf, 102, y_h, formato_clp(datos["Colacion"]).replace("$","").strip())
 
+    # --- Columna Derecha (Descuentos) ---
     afp_nombre = datos["Nombre AFP"].split('(')[0].strip().upper()
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
     
@@ -420,7 +422,7 @@ def generar_pdf_liquidacion(datos):
         right_text(pdf, 198, y_d, formato_clp(datos["Dcto Cesantia"]).replace("$","").strip())
 
     y_d += 6
-    pdf.line(105, y_d+1, 200, y_d+1)
+    pdf.line(105, y_d+1, 200, y_d+1) # Línea de subtotal
     y_d += 6
     pdf.set_font("Arial", 'B', 9)
     pdf.text(107, y_d, "Total Previsión:")
@@ -448,7 +450,7 @@ def generar_pdf_liquidacion(datos):
         pdf.text(107, y_d, "Anticipo:")
         right_text(pdf, 198, y_d, formato_clp(datos["Anticipo"]).replace("$","").strip())
         
-    # 4. CELDA DE TOTALES
+    # 4. CELDA DE TOTALES HABERES Y DESCUENTOS
     y_tot = y_t + h_table
     pdf.rect(10, y_tot, 190, 8) 
     pdf.line(105, y_tot, 105, y_tot + 8)
@@ -469,10 +471,10 @@ def generar_pdf_liquidacion(datos):
     pdf.text(122, y_alc + 5, "ALCANCE LIQUIDO:")
     right_text(pdf, 198, y_alc + 5, formato_clp(datos["Alcance Liquido"]).replace("$","").strip())
     
-    pdf.text(122, y_alc + 14, "TOTAL A PAGAR:")
-    right_text(pdf, 198, y_alc + 14, formato_clp(datos["Total a Pagar"]).replace("$","").strip())
+    pdf.text(122, y_alc + 13, "TOTAL A PAGAR:")
+    right_text(pdf, 198, y_alc + 13, formato_clp(datos["Total a Pagar"]).replace("$","").strip())
     
-    # 6. FOOTER 
+    # 6. FOOTER (PALABRAS Y FIRMAS)
     y_palabras = y_alc + 20
     pdf.set_font("Arial", '', 9)
     texto_son = num2words(int(datos['Total a Pagar'])).upper()
@@ -1075,35 +1077,16 @@ elif st.session_state.menu_actual == "Operaciones":
 
         with st.container(border=True):
             st.markdown("#### 3️⃣ Asignación de Tareas Específicas")
-            
-            # --- NUEVO: VINCULACIÓN DIRECTA CON TRABAJADORES DE NÓMINA ---
-            lista_trabajadores_nomina = st.session_state.nomina["Trabajador"].tolist()
-            
-            if not lista_trabajadores_nomina:
-                st.info("Agrega trabajadores en la pestaña de 'Finanzas' para poder asignarles tareas.")
+            if not trabajadores_financiados:
+                st.info("El equipo debe estar conformado para asignar tareas.")
             else:
                 with st.expander("➕ Añadir Nueva Tarea", expanded=False):
                     colT1, colT2 = st.columns([1, 2])
-                    encargado_tarea = colT1.selectbox("Asignar a (Desde Nómina):", lista_trabajadores_nomina)
+                    encargado_tarea = colT1.selectbox("Asignar a:", trabajadores_financiados)
                     desc_tarea = colT2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalar tablero eléctrico principal")
-                    
-                    # --- NUEVO: SECCIÓN DE FECHAS PARA GANTT ---
-                    colT3, colT4 = st.columns(2)
-                    f_ini_tarea = colT3.date_input("Fecha Inicio Tarea", format="DD/MM/YYYY")
-                    f_fin_tarea = colT4.date_input("Fecha Fin Tarea", format="DD/MM/YYYY")
-                    
                     if st.button("Crear Tarea"):
                         if desc_tarea:
-                            str_ini_t = f_ini_tarea.strftime('%Y-%m-%d')
-                            str_fin_t = f_fin_tarea.strftime('%Y-%m-%d')
-                            nueva_tarea = pd.DataFrame([{
-                                "Proyecto": proyecto_seg, 
-                                "Trabajador": encargado_tarea, 
-                                "Tarea": desc_tarea, 
-                                "Estado": "Pendiente",
-                                "Fecha_Inicio": str_ini_t,
-                                "Fecha_Termino": str_fin_t
-                            }])
+                            nueva_tarea = pd.DataFrame([{"Proyecto": proyecto_seg, "Trabajador": encargado_tarea, "Tarea": desc_tarea, "Estado": "Pendiente"}])
                             st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
                             guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
                             st.success("Tarea asignada.")
@@ -1113,15 +1096,11 @@ elif st.session_state.menu_actual == "Operaciones":
                 mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
                 df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
                 if df_tareas_filtradas.empty:
-                    st.info("No hay tareas registradas para este proyecto.")
+                    st.info("No hay tareas registradas para este equipo.")
                 else:
                     df_tareas_editadas = st.data_editor(
                         df_tareas_filtradas,
-                        column_config={
-                            "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"]),
-                            "Fecha_Inicio": st.column_config.DateColumn("Inicio"),
-                            "Fecha_Termino": st.column_config.DateColumn("Fin")
-                        },
+                        column_config={"Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"])},
                         disabled=["Proyecto", "Trabajador", "Tarea"], hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
                     )
                     if st.button("💾 Guardar Progreso de Tareas", type="primary"):
@@ -1129,31 +1108,6 @@ elif st.session_state.menu_actual == "Operaciones":
                         st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
                         guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
                         st.success("Estados actualizados.")
-                    
-                    # --- NUEVO: CARTA GANTT AUTOMÁTICA ---
-                    st.divider()
-                    st.markdown("#### 📊 Carta Gantt del Proyecto")
-                    df_gantt = df_tareas_filtradas.copy()
-                    # Prevenir errores con fechas vacías
-                    df_gantt['Fecha_Inicio'] = pd.to_datetime(df_gantt['Fecha_Inicio'], errors='coerce')
-                    df_gantt['Fecha_Termino'] = pd.to_datetime(df_gantt['Fecha_Termino'], errors='coerce')
-                    df_gantt = df_gantt.dropna(subset=['Fecha_Inicio', 'Fecha_Termino'])
-                    
-                    if not df_gantt.empty:
-                        gantt = alt.Chart(df_gantt).mark_bar(cornerRadius=4, height=20).encode(
-                            x=alt.X('Fecha_Inicio:T', title='Timeline'),
-                            x2=alt.X2('Fecha_Termino:T'),
-                            y=alt.Y('Tarea:N', sort=alt.EncodingSortField(field='Fecha_Inicio', order='ascending'), title=''),
-                            color=alt.Color('Estado:N', scale=alt.Scale(
-                                domain=['Pendiente', 'En proceso', 'Terminada'], 
-                                range=['#ef4444', '#eab308', '#22c55e']
-                            )),
-                            tooltip=['Tarea', 'Trabajador', 'Estado', 'Fecha_Inicio', 'Fecha_Termino']
-                        ).properties(height=300)
-                        st.altair_chart(gantt, use_container_width=True)
-                    else:
-                        st.caption("No hay tareas con fechas válidas para mostrar en la Carta Gantt.")
-
                     with st.expander("🗑️ Eliminar una Tarea"):
                         lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
                         if lista_nombres_tareas:
