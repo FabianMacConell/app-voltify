@@ -200,9 +200,10 @@ def calcular_liquidaciones(df):
         movilizacion = float(row.get('Movilizacion', 0))
         no_imponibles = colacion + movilizacion
         
+        # Matemáticas contables estrictas: Anticipo no influye en la resta.
         total_prevision = dcto_afp + dcto_fonasa + dcto_cesantia
         alcance_liquido = sueldo_imponible - total_prevision + no_imponibles
-        total_a_pagar = alcance_liquido - anticipo
+        total_a_pagar = alcance_liquido # <--- MODIFICACIÓN: Ya no resta el anticipo
         
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
@@ -248,6 +249,7 @@ def num2words(n):
     return num2words(n // 1000000) + " MILLONES " + num2words(n % 1000000)
 
 def right_text(pdf, x, y, text):
+    """Alinea textos perfectamente a la derecha en la coordenada indicada"""
     width = pdf.get_string_width(text)
     pdf.text(x - width, y, text)
 
@@ -259,6 +261,7 @@ def generar_pdf_liquidacion(datos):
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
+    # 1. ENCABEZADO
     pdf.set_font("Arial", 'B', 10)
     pdf.text(10, 15, "VOLTIFY SPA")
     pdf.set_font("Arial", '', 9)
@@ -266,9 +269,11 @@ def generar_pdf_liquidacion(datos):
     pdf.text(10, 25, "JAVIERA CARRERA #1150 ARICA")
     pdf.text(10, 30, "Teléfono Cel 995635899")
     
+    # 2. TÍTULO CENTRAL
     pdf.set_font("Arial", 'B', 12)
     pdf.text(10, 42, "Liquidación de Sueldo Mensual")
     
+    # 3. DATOS DEL TRABAJADOR Y CONTRATO
     y_info = 55
     trabajador_limpio = str(datos['Trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
     cargo_limpio = str(datos['Cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
@@ -278,6 +283,7 @@ def generar_pdf_liquidacion(datos):
     mes_actual = meses_str[datetime.datetime.now().month - 1]
     anio_actual = datetime.datetime.now().year
     
+    # Fila 1
     pdf.set_font("Arial", '', 9)
     pdf.text(10, y_info, "RUT:")
     pdf.text(22, y_info, rut_trabajador)
@@ -286,6 +292,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(145, y_info, "Fecha Contrato:")
     pdf.text(175, y_info, ": 01-01-2026") 
     
+    # Fila 2
     y_info += 6
     pdf.text(10, y_info, "Año:")
     pdf.text(22, y_info, str(anio_actual))
@@ -297,21 +304,25 @@ def generar_pdf_liquidacion(datos):
     pdf.text(150, y_info, "UF:")
     pdf.text(160, y_info, "39.841,72")
     
+    # Fila 3
     y_info += 6
     pdf.text(10, y_info, "Cargo:")
     pdf.text(22, y_info, cargo_limpio)
     
+    # 4. TABLA DE HABERES Y DESCUENTOS (Diseño Abierto)
     y_t = 75
     pdf.set_font("Arial", 'B', 9)
     pdf.text(45, y_t, "HABERES")
     pdf.text(145, y_t, "DESCUENTOS")
     
+    # --- Columna Izquierda (Haberes) ---
     pdf.set_font("Arial", '', 9)
     y_h = y_t + 8
     dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
     pdf.text(10, y_h, f"Días Trabajados: {dias_trabajados},00")
     
-    pdf.text(45, y_h, "Sueldo:")
+    y_h += 6
+    pdf.text(10, y_h, "Sueldo:")
     right_text(pdf, 100, y_h, formato_clp(datos["Sueldo Proporcional"]).replace("$","").strip())
     
     if datos["Horas Extras Qty"] > 0:
@@ -322,13 +333,14 @@ def generar_pdf_liquidacion(datos):
         right_text(pdf, 100, y_h, formato_clp(datos["Horas Extras Monto"]).replace("$","").strip())
     
     y_h += 6
-    pdf.text(45, y_h, "Gratificación:")
+    pdf.text(10, y_h, "Gratificación:")
     right_text(pdf, 100, y_h, formato_clp(datos["Gratificacion"]).replace("$","").strip())
     
     y_h += 8
     pdf.text(10, y_h, "Total Imponible:")
     right_text(pdf, 100, y_h, formato_clp(datos["Imponible Calculado"]).replace("$","").strip())
     
+    # === CORRECCIÓN DE COORDENADAS PARA QUE NO CHOQUE EL TEXTO ===
     y_h += 8
     pdf.text(12, y_h, "Cargas:")
     if datos["Movilizacion"] > 0:
@@ -346,6 +358,7 @@ def generar_pdf_liquidacion(datos):
     right_text(pdf, 100, y_h, formato_clp(datos["Total Haberes"]).replace("$","").strip())
     pdf.set_font("Arial", '', 9)
 
+    # --- Columna Derecha (Descuentos) ---
     afp_nombre = datos["Nombre AFP"].split('(')[0].strip().upper()
     afp_tasa = datos["Nombre AFP"].split('(')[1].replace(')', '').strip() if '(' in datos["Nombre AFP"] else ""
     
@@ -370,7 +383,7 @@ def generar_pdf_liquidacion(datos):
     
     y_d += 6
     pdf.text(115, y_d, "Cotización Pactado:")
-    pdf.text(155, y_d, "0 UF")
+    pdf.text(145, y_d, "0 UF")
     right_text(pdf, 195, y_d, formato_clp(datos["Dcto Fonasa"]).replace("$","").strip())
     
     if datos["Dcto Cesantia"] > 0:
@@ -411,6 +424,7 @@ def generar_pdf_liquidacion(datos):
         pdf.text(115, y_d, "Anticipo:")
         right_text(pdf, 195, y_d, formato_clp(datos["Anticipo"]).replace("$","").strip())
     
+    # --- 5. TOTALES FINALES ---
     y_tot = max(y_h, y_d) + 10
     
     pdf.set_font("Arial", 'B', 9)
@@ -425,6 +439,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(145, y_tot, "TOTAL A PAGAR:")
     right_text(pdf, 195, y_tot, formato_clp(datos["Total a Pagar"]).replace("$","").strip())
     
+    # --- 6. TEXTO LEGAL EN PALABRAS Y FIRMA ---
     y_palabras = y_tot + 15
     pdf.set_font("Arial", '', 9)
     texto_son = num2words(int(datos['Total a Pagar'])).upper()
