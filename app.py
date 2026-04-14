@@ -348,7 +348,7 @@ def generar_pdf_liquidacion(datos):
     pdf.text(12, y_h, "Cargas:")
     
     y_h += 6
-    pdf.text(60, y_h, "Asignación Movilización:")
+    pdf.text(45, y_h, "Asignación Movilización:")
     right_text(pdf, 102, y_h, formato_clp(datos["Movilizacion"]).replace("$","").strip())
     
     y_h += 6
