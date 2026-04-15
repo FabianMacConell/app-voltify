@@ -1139,26 +1139,33 @@ elif st.session_state.menu_actual == "Proyectos":
 # PANTALLA 4: SEGUIMIENTO OPERATIVO (MONDAY FASE 2 & 3)
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
-    st.markdown("### ⏱️ Work OS: Gestión Operativa")
-    
-    proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
-    if not proyectos_lista_seg:
-        with st.container(border=True):
-            st.warning("No hay proyectos creados. Ve a la pestaña 'Proyectos' para crear tu primera obra.")
-    else:
-        proyecto_seg = st.selectbox("📁 Espacio de Trabajo (Selecciona Proyecto):", proyectos_lista_seg)
-        idx_p_seg = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seg].index[0]
+  st.markdown("#### 📊 Panel de Control y Progreso")
+        mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+        df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
         
-        # --- HEADER DEL PROYECTO ---
-        tareas_proy = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg]
-        total_t = len(tareas_proy)
-        terminadas = len(tareas_proy[tareas_proy["Estado"].str.contains('Terminada', na=False)]) if total_t > 0 else 0
-        porc = int((terminadas / total_t) * 100) if total_t > 0 else 0
-        
-        st.markdown(f"#### 🚀 Proyecto: {proyecto_seg}")
-        st.progress(porc / 100.0, text=f"Progreso Global: {porc}% ({terminadas}/{total_t} Tareas Completadas)")
-        st.write("")
-        
+        if df_tareas_filtradas.empty:
+            st.info("No hay tareas registradas para este equipo.")
+        else:
+            df_tareas_editadas = st.data_editor(
+                df_tareas_filtradas,
+                column_config={
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"]),
+                },
+                disabled=["Proyecto", "Trabajador", "Tarea"],
+                hide_index=True,
+                use_container_width=True,
+                key=f"ed_tar_{proyecto_seg}"
+            )
+            
+            if st.button("💾 Guardar Progreso de Tareas", type="primary"):
+                # Sincronizamos los cambios realizados en el editor con el estado global
+                st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
+                st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
+                
+                # 🚀 Guardado real en PostgreSQL para que no se borre con F5
+                guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                st.success("Estados actualizados permanentemente.")
+                st.rerun()
         # --- VISTAS ---
         tab_tablero, tab_workload, tab_equipo, tab_config = st.tabs(["📌 Tablero de Tareas", "📊 Carga y Vencimientos", "👥 Equipo de Trabajo", "⚙️ Ajustes de Proyecto"])
 
