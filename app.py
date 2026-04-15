@@ -132,12 +132,10 @@ if 'proyectos_equipo' not in st.session_state:
     df_equipo_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Rol_Proyecto"])
     st.session_state.proyectos_equipo = cargar_datos("Proyectos_Equipo", df_equipo_base)
 
-# NUEVO ESQUEMA DE TAREAS CON PRIORIDAD
 if 'proyectos_tareas' not in st.session_state:
     df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino", "Prioridad"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
 
-# RETROCOMPATIBILIDAD DE FECHAS Y PRIORIDAD EN TAREAS
 if 'Fecha_Inicio' not in st.session_state.proyectos_tareas.columns:
     st.session_state.proyectos_tareas['Fecha_Inicio'] = datetime.date.today().strftime('%Y-%m-%d')
 if 'Fecha_Termino' not in st.session_state.proyectos_tareas.columns:
@@ -558,7 +556,7 @@ if b6.button("📊 Balance", type="primary" if st.session_state.menu_actual == "
 st.divider()
 
 # ==========================================
-# PANTALLA 0: HOME DASHBOARD
+# PANTALLA 0: HOME DASHBOARD (FASE 1 MONDAY)
 # ==========================================
 if st.session_state.menu_actual == "Inicio":
     st.markdown("## 📊 Panel de Control General")
@@ -814,14 +812,19 @@ elif st.session_state.menu_actual == "Finanzas":
 # ==========================================
 elif st.session_state.menu_actual == "Presupuestos":
     st.markdown("### Gestión de Presupuestos y Cotizaciones")
+    
+    if 'form_id_presup' not in st.session_state:
+        st.session_state.form_id_presup = 0
+    fid_p = st.session_state.form_id_presup
+    
     with st.container(border=True):
         with st.expander("➕ Crear Nueva Cotización / Presupuesto", expanded=False):
-            tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True)
+            tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True, key=f"tipo_p_{fid_p}")
             colP1, colP2 = st.columns(2)
             if tipo_pres == "Asociada a un Proyecto":
                 proyectos_existentes = st.session_state.proyectos_resumen["Proyecto"].tolist()
                 if proyectos_existentes:
-                    ref_pres = colP1.selectbox("Seleccionar Proyecto:", proyectos_existentes)
+                    ref_pres = colP1.selectbox("Seleccionar Proyecto:", proyectos_existentes, key=f"sel_proy_{fid_p}")
                     idx_pres = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == ref_pres].index[0]
                     cliente_pres = st.session_state.proyectos_resumen.at[idx_pres, "Empresa"]
                     colP2.info(f"Cliente vinculado: **{cliente_pres}**")
@@ -829,20 +832,22 @@ elif st.session_state.menu_actual == "Presupuestos":
                     st.warning("Aún no tienes proyectos creados.")
                     ref_pres, cliente_pres = None, None
             else:
-                ref_pres = colP1.text_input("Nombre del Producto o Servicio:", placeholder="Ej: Venta de 50m cable eléctrico")
-                cliente_pres = colP2.text_input("Nombre del Cliente:")
+                ref_pres = colP1.text_input("Nombre del Producto o Servicio:", placeholder="Ej: Venta de 50m cable eléctrico", key=f"ref_{fid_p}")
+                cliente_pres = colP2.text_input("Nombre del Cliente:", key=f"cli_{fid_p}")
                 
             colP3, colP4 = st.columns(2)
-            if 'input_monto_presupuesto' not in st.session_state: st.session_state['input_monto_presupuesto'] = "0"
-            colP3.text_input("Monto Total Cotizado (CLP):", key="input_monto_presupuesto", on_change=formatear_input, kwargs={'llave': 'input_monto_presupuesto'})
-            monto_pres = float(st.session_state['input_monto_presupuesto'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+            llave_monto = f"input_monto_presupuesto_{fid_p}"
+            if llave_monto not in st.session_state: st.session_state[llave_monto] = "0"
+            colP3.text_input("Monto Total Cotizado (CLP):", key=llave_monto, on_change=formatear_input, kwargs={'llave': llave_monto})
+            monto_pres = float(st.session_state[llave_monto].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
             
-            fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY")
+            fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY", key=f"fecha_{fid_p}")
             
             colP5, colP6, colP7 = st.columns(3)
-            aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada"])
-            orden_pres = colP6.selectbox("Respaldo de Orden:", ["Sin Orden", "Con Orden"])
-            num_oc_pres = colP7.text_input("N° OC (Si aplica):", placeholder="Ej: OC-1234")
+            # FASE 1: Semáforos visuales
+            aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada"], key=f"apr_{fid_p}")
+            orden_pres = colP6.selectbox("Respaldo de Orden:", ["Sin Orden", "Con Orden"], key=f"ord_{fid_p}")
+            num_oc_pres = colP7.text_input("N° OC (Si aplica):", placeholder="Ej: OC-1234", key=f"oc_{fid_p}")
             if not num_oc_pres: num_oc_pres = "N/A"
             
             if st.button("Guardar Presupuesto", type="primary"):
@@ -855,7 +860,10 @@ elif st.session_state.menu_actual == "Presupuestos":
                     }])
                     st.session_state.presupuestos = pd.concat([st.session_state.presupuestos, nuevo_presupuesto], ignore_index=True)
                     guardar_datos("Presupuestos", st.session_state.presupuestos)
-                    st.session_state['input_monto_presupuesto'] = "0"
+                    
+                    # FIX: Incrementamos ID en vez de asignar string
+                    st.session_state.form_id_presup += 1 
+                    
                     st.success("Presupuesto ingresado exitosamente.")
                     st.rerun()
                 else:
@@ -866,6 +874,7 @@ elif st.session_state.menu_actual == "Presupuestos":
         if st.session_state.presupuestos.empty:
             st.info("Aún no hay cotizaciones emitidas en el sistema.")
         else:
+            # FASE 1: Semáforos visuales
             opciones_estado = ["📝 Presupuestada", "🎯 Adjudicada", "🚀 En progreso", "📦 Entregada", "💳 Pagada"]
             opciones_aprobacion = ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada", "Pendiente", "Aprobada", "No Aprobada"]
             opciones_orden = ["Sin Orden", "Con Orden"]
@@ -1071,7 +1080,7 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 4: SEGUIMIENTO OPERATIVO (NUEVO REDISEÑO MONDAY FASE 3)
+# PANTALLA 4: SEGUIMIENTO OPERATIVO (MONDAY FASE 2)
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
     st.markdown("### ⏱️ Work OS: Gestión Operativa")
@@ -1095,7 +1104,7 @@ elif st.session_state.menu_actual == "Operaciones":
         st.write("")
         
         # --- VISTAS ---
-        tab_tablero, tab_workload, tab_equipo, tab_config = st.tabs(["📌 Tablero de Tareas", "📊 Carga y Vencimientos", "👥 Equipo de Trabajo", "⚙️ Ajustes de Proyecto"])
+        tab_tablero, tab_gantt, tab_equipo, tab_config = st.tabs(["📌 Tablero de Tareas", "📅 Cronograma (Gantt)", "👥 Equipo de Trabajo", "⚙️ Ajustes de Proyecto"])
 
         # ==============================================
         # VISTA 1: TABLERO DE TAREAS (KANBAN & LISTA)
@@ -1231,52 +1240,29 @@ elif st.session_state.menu_actual == "Operaciones":
                                 st.rerun()
 
         # ==============================================
-        # VISTA 2: CARGA DE TRABAJO Y VENCIMIENTOS (REEMPLAZA AL GANTT)
+        # VISTA 2: GANTT
         # ==============================================
-        with tab_workload:
-            st.markdown("#### 📊 Carga de Trabajo del Equipo")
-            st.caption("Visualiza quién está sobrecargado y qué tareas requieren atención inmediata.")
+        with tab_gantt:
+            st.markdown("#### Línea de Tiempo del Proyecto")
+            df_gantt = tareas_proy.copy()
+            df_gantt['Fecha_Inicio'] = pd.to_datetime(df_gantt['Fecha_Inicio'], errors='coerce')
+            df_gantt['Fecha_Termino'] = pd.to_datetime(df_gantt['Fecha_Termino'], errors='coerce')
+            df_gantt = df_gantt.dropna(subset=['Fecha_Inicio', 'Fecha_Termino'])
             
-            tareas_activas = tareas_proy[~tareas_proy['Estado'].str.contains('Terminada', na=False)].copy()
-            
-            col_c1, col_c2 = st.columns([1, 1])
-            
-            with col_c1:
-                with st.container(border=True):
-                    st.markdown("**Distribución de Tareas Activas**")
-                    if not tareas_activas.empty:
-                        carga_df = tareas_activas.groupby('Trabajador').size().reset_index(name='Tareas')
-                        grafico_carga = alt.Chart(carga_df).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#3b82f6").encode(
-                            y=alt.Y('Trabajador:N', title='', sort='-x'),
-                            x=alt.X('Tareas:Q', title='Nº Tareas Pendientes o En Proceso'),
-                            tooltip=['Trabajador', 'Tareas']
-                        ).properties(height=300)
-                        st.altair_chart(grafico_carga, use_container_width=True)
-                    else:
-                        st.success("No hay tareas activas.")
-
-            with col_c2:
-                with st.container(border=True):
-                    st.markdown("**⏰ Próximos Vencimientos**")
-                    if not tareas_activas.empty:
-                        tareas_activas['Fecha_Termino_DT'] = pd.to_datetime(tareas_activas['Fecha_Termino'], errors='coerce')
-                        tareas_urgentes = tareas_activas.sort_values(by=['Fecha_Termino_DT']).head(5)
-                        
-                        for idx, row in tareas_urgentes.iterrows():
-                            if pd.notna(row['Fecha_Termino_DT']):
-                                dias_restantes = (row['Fecha_Termino_DT'].date() - datetime.date.today()).days
-                                if dias_restantes < 0:
-                                    alerta = "🔴 **VENCIDA**"
-                                elif dias_restantes <= 2:
-                                    alerta = "🟡 **URGE**"
-                                else:
-                                    alerta = "🟢 A TIEMPO"
-                            else:
-                                alerta = "⚪ Sin fecha"
-                                
-                            st.info(f"**{row['Tarea']}** ({row.get('Prioridad', '⚡ Media')})\n\n👤 {row['Trabajador']} | 📅 {row['Fecha_Termino']} | {alerta}")
-                    else:
-                        st.success("Nada por vencer.")
+            if not df_gantt.empty:
+                gantt = alt.Chart(df_gantt).mark_bar(cornerRadius=4, height=20).encode(
+                    x=alt.X('Fecha_Inicio:T', title='Fechas'),
+                    x2=alt.X2('Fecha_Termino:T'),
+                    y=alt.Y('Tarea:N', sort=alt.EncodingSortField(field='Fecha_Inicio', order='ascending'), title=''),
+                    color=alt.Color('Estado:N', scale=alt.Scale(
+                        domain=['🔴 Pendiente', '🟡 En proceso', '🟢 Terminada'], 
+                        range=['#ef4444', '#eab308', '#22c55e']
+                    )),
+                    tooltip=['Tarea', 'Trabajador', 'Estado', 'Fecha_Inicio', 'Fecha_Termino']
+                ).properties(height=350)
+                st.altair_chart(gantt, use_container_width=True)
+            else:
+                st.info("Agrega tareas con fechas válidas en el Tablero para ver la Carta Gantt.")
 
 
         # ==============================================
@@ -1377,7 +1363,6 @@ elif st.session_state.menu_actual == "Inventario":
             if st.button("Guardar en Inventario", type="primary"):
                 if nuevo_art:
                     nuevo_serie = f"VLT-{uuid.uuid4().hex[:6].upper()}"
-                    # FASE 1: Semáforos visuales en Inventario
                     nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": nueva_cant, "Nro_Serie": nuevo_serie, "Estado": "🟢 Disponible"}])
                     st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
                     guardar_datos("Inventario", st.session_state.inventario)
@@ -1411,7 +1396,6 @@ elif st.session_state.menu_actual == "Inventario":
                 st.session_state.inventario,
                 column_config={
                     "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0),
-                    # FASE 1: Semáforos visuales en Inventario
                     "Estado": st.column_config.SelectboxColumn("Estado", options=["🟢 Disponible", "🟡 En Uso", "🛠️ En Reparación", "❌ Extraviado", "Disponible", "En Uso", "En Reparación", "Extraviado"]),
                     "Nro_Serie": st.column_config.TextColumn("N° de Serie (Automático)")
                 },
