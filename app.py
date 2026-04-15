@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
 import json
 import datetime
 import os
@@ -40,81 +42,53 @@ st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
 LOGO_URL = "logo.png"
 
 # ==========================================
-# 2. CONEXIÓN A BASE DE DATOS (POSTGRESQL / SUPABASE)
+# 2. CONEXIÓN A GOOGLE SHEETS
 # ==========================================
-from supabase import create_client, Client
-
-@st.cache_resource
-def init_connection() -> Client:
-    """Inicializa la conexión con Supabase almacenándola en caché para máxima velocidad."""
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
-
-try:
-    supabase = init_connection()
-except Exception as e:
-    st.error(f"🚨 ERROR CRÍTICO DE CONEXIÓN A POSTGRESQL: {e}")
-    st.stop()
-
-def cargar_datos(nombre_tabla, df_default):
-    """Carga los datos desde Supabase y los devuelve como un DataFrame de Pandas."""
+def conectar_google_sheets():
     try:
-        # Convertimos los nombres a minúsculas porque PostgreSQL maneja mejor las tablas en minúsculas
-        tabla_pg = nombre_tabla.lower()
-        response = supabase.table(tabla_pg).select("*").execute()
-        
-        if response.data:
-            df = pd.DataFrame(response.data)
-            # Limpiamos columnas de ID internas si existen para no afectar la UI
-            if 'id' in df.columns:
-                df = df.drop(columns=['id'])
-            return df
-        return df_default
+        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        secreto = st.secrets["google_credentials"]
+        if isinstance(secreto, str): creds_dict = json.loads(secreto.strip())
+        else: creds_dict = dict(secreto)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+        return client.open("Base de Datos Voltify")
     except Exception as e:
-        st.error(f"Error al cargar datos de {nombre_tabla}: {e}")
-        return df_default
+        st.error(f"🚨 ERROR CRÍTICO DE CONEXIÓN: {e}")
+        st.stop()
 
-def guardar_datos(nombre_tabla, df):
-    """Guarda el DataFrame en Supabase. En este MVP, limpiamos y reinsertamos emulando la lógica anterior."""
+def obtener_o_crear_hoja(libro, nombre_hoja, columnas):
     try:
-        tabla_pg = nombre_tabla.lower()
-        df_clean = df.fillna(0).copy()
+        return libro.worksheet(nombre_hoja)
+    except gspread.exceptions.WorksheetNotFound:
+        hoja = libro.add_worksheet(title=nombre_hoja, rows="100", cols=str(len(columnas)))
+        hoja.append_row(columnas)
+        return hoja
+
+def guardar_datos(nombre_hoja, df):
+    try:
+        libro = conectar_google_sheets()
+        df_clean = df.fillna(0)
         
-        # Formatear columnas de texto y fechas para que PostgreSQL las reciba correctamente
-        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 
-                        'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 
-                        'Duracion_Proy', 'Nro_Serie', 'Aprobacion', 'Orden_Compra', 'Estado_Comercial']
+        columnas_str = ['RUT', 'Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
         for col in columnas_str:
-            if col in df_clean.columns: 
-                df_clean[col] = df_clean[col].astype(str)
-                
-        # Seguridad: Quitamos el 'id' del DataFrame para que PostgreSQL lo genere limpio y sin choques
-        if 'id' in df_clean.columns:
-            df_clean = df_clean.drop(columns=['id'])
-                
-        # --- LÓGICA INTELIGENTE DEFINITIVA ---
-        # PostgreSQL necesita saber qué columna usar para limpiar la tabla entera.
-        if tabla_pg == "nomina_personal":
-            columna_clave = "Trabajador"
-        elif tabla_pg == "proyectos_resumen":
-            columna_clave = "Proyecto"
-        elif tabla_pg == "inventario":
-            columna_clave = "Nro_Serie"
-        else:
-            # presupuestos, proyectos_gastos, proyectos_equipo, proyectos_tareas, gastos_fijos
-            columna_clave = "id"
+            if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
             
-        # 1. Vaciar tabla actual usando la clave correcta (Emulando el clear de Sheets)
-        supabase.table(tabla_pg).delete().neq(columna_clave, "0").execute()
-        
-        # 2. Insertar nuevos registros
-        if not df_clean.empty:
-            registros = df_clean.to_dict(orient='records')
-            supabase.table(tabla_pg).insert(registros).execute()
-            
+        hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
+        hoja.clear()
+        hoja.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
     except Exception as e:
-        st.error(f"Error al guardar datos en PostgreSQL ({nombre_tabla}): {e}")
+        st.error(f"Error al guardar datos: {e}")
+
+def cargar_datos(nombre_hoja, df_default):
+    try:
+        libro = conectar_google_sheets()
+        hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_default.columns.tolist())
+        datos = hoja.get_all_records()
+        if not datos: return df_default
+        return pd.DataFrame(datos)
+    except Exception:
+        return df_default
 
 # ==========================================
 # 3. DATOS BASE Y CÁLCULOS
@@ -134,6 +108,7 @@ if 'nomina' not in st.session_state:
     }])
     st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
 
+# GARANTÍA DE RETROCOMPATIBILIDAD
 columnas_obligatorias = ["Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Anticipo"]
 for col in columnas_obligatorias:
     if col not in st.session_state.nomina.columns:
@@ -159,15 +134,8 @@ if 'proyectos_equipo' not in st.session_state:
     st.session_state.proyectos_equipo = cargar_datos("Proyectos_Equipo", df_equipo_base)
 
 if 'proyectos_tareas' not in st.session_state:
-    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino", "Prioridad"])
+    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
-
-if 'Fecha_Inicio' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Fecha_Inicio'] = datetime.date.today().strftime('%Y-%m-%d')
-if 'Fecha_Termino' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Fecha_Termino'] = datetime.date.today().strftime('%Y-%m-%d')
-if 'Prioridad' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Prioridad'] = '⚡ Media'
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
@@ -232,7 +200,6 @@ def calcular_liquidaciones(df):
         movilizacion = float(row.get('Movilizacion', 0))
         no_imponibles = colacion + movilizacion
         
-        # Matemática: Anticipo SÍ suma a descuentos y resta de a pagar (Restaurado a la versión que aprobaste)
         total_prevision = dcto_afp + dcto_fonasa + dcto_cesantia
         total_descuentos = total_prevision + anticipo 
         
@@ -289,7 +256,7 @@ def right_text(pdf, x, y, text):
 
 
 # ==========================================
-# MOTOR PDF: EL CÓDIGO EXACTO QUE ME ENVIASTE (BLOQUEADO Y PROTEGIDO)
+# MOTOR PDF: LÍNEAS, CELDAS Y TODOS LOS DATOS
 # ==========================================
 def generar_pdf_liquidacion(datos):
     pdf = FPDF(unit='mm', format='A4')
@@ -577,7 +544,7 @@ if not st.session_state.acceso_app:
 # ==========================================
 # 5. NAVEGACIÓN SUPERIOR
 # ==========================================
-if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Inicio"
+if 'menu_actual' not in st.session_state: st.session_state.menu_actual = "Finanzas"
 
 col_logo, col_espacio, col_settings = st.columns([3, 7, 2], vertical_alignment="bottom")
 
@@ -604,9 +571,8 @@ with col_settings:
 
 st.write("") 
 
-b0, b1, b2, b3, b4, b5, b6 = st.columns(7)
+b1, b2, b3, b4, b5, b6 = st.columns(6)
 
-if b0.button("🏠 Inicio", type="primary" if st.session_state.menu_actual == "Inicio" else "secondary", use_container_width=True): st.session_state.menu_actual = "Inicio"; st.rerun()
 if b1.button("💼 Finanzas", type="primary" if st.session_state.menu_actual == "Finanzas" else "secondary", use_container_width=True): st.session_state.menu_actual = "Finanzas"; st.rerun()
 if b2.button("📝 Presup.", type="primary" if st.session_state.menu_actual == "Presupuestos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Presupuestos"; st.rerun()
 if b3.button("🏗️ Proyectos", type="primary" if st.session_state.menu_actual == "Proyectos" else "secondary", use_container_width=True): st.session_state.menu_actual = "Proyectos"; st.rerun()
@@ -617,72 +583,6 @@ if b6.button("📊 Balance", type="primary" if st.session_state.menu_actual == "
 st.divider()
 
 # ==========================================
-# PANTALLA 0: HOME DASHBOARD
-# ==========================================
-if st.session_state.menu_actual == "Inicio":
-    st.markdown("## 📊 Panel de Control General")
-    st.caption("Visión global del estado de Voltify SpA.")
-    
-    total_trabajadores = len(st.session_state.nomina)
-    presupuestos_pendientes = st.session_state.presupuestos[st.session_state.presupuestos['Aprobacion'].str.contains('Pendiente', na=False)]['Monto'].sum()
-    if pd.isna(presupuestos_pendientes): presupuestos_pendientes = 0
-    proyectos_activos = len(st.session_state.proyectos_resumen)
-    
-    colA, colB, colC = st.columns(3)
-    with colA:
-        with st.container(border=True):
-            st.metric("👥 Trabajadores Activos", total_trabajadores)
-    with colB:
-        with st.container(border=True):
-            st.metric("🏗️ Proyectos en Curso", proyectos_activos)
-    with colC:
-        with st.container(border=True):
-            st.metric("⏳ Presupuestos Pendientes", formato_clp(presupuestos_pendientes))
-
-    st.write("")
-    col_izq, col_der = st.columns(2)
-    
-    with col_izq:
-        with st.container(border=True):
-            st.markdown("#### 📈 Estado General de Proyectos")
-            if st.session_state.proyectos_resumen.empty:
-                st.info("No hay proyectos activos para medir.")
-            else:
-                for idx, row in st.session_state.proyectos_resumen.iterrows():
-                    nombre_proy = row["Proyecto"]
-                    tareas_proy = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] == nombre_proy]
-                    
-                    if tareas_proy.empty:
-                        st.write(f"**{nombre_proy}**: *Sin tareas asignadas*")
-                        st.progress(0)
-                    else:
-                        terminadas = len(tareas_proy[tareas_proy["Estado"].str.contains('Terminada', na=False)])
-                        total = len(tareas_proy)
-                        porcentaje = int((terminadas / total) * 100)
-                        st.write(f"**{nombre_proy}**")
-                        st.progress(porcentaje / 100.0, text=f"Completado: {porcentaje}%")
-
-    with col_der:
-        with st.container(border=True):
-            st.markdown("#### 🚨 Alertas y Urgencias")
-            
-            tareas_urgentes = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas['Estado'].isin(['🔴 Pendiente', '🟡 En proceso', 'Pendiente', 'En proceso'])]
-            if not tareas_urgentes.empty:
-                st.write("**Tareas Pendientes en Terreno:**")
-                st.dataframe(tareas_urgentes[['Proyecto', 'Tarea', 'Estado']], hide_index=True, use_container_width=True)
-            else:
-                st.success("¡Todo al día en terreno!")
-            
-            st.divider()
-            
-            inventario_alerta = st.session_state.inventario[st.session_state.inventario['Estado'].isin(['🛠️ En Reparación', '❌ Extraviado', 'En Reparación', 'Extraviado'])]
-            if not inventario_alerta.empty:
-                st.write("**Herramientas Inoperativas:**")
-                st.dataframe(inventario_alerta[['Artículo', 'Estado']], hide_index=True, use_container_width=True)
-            else:
-                st.success("Inventario 100% operativo.")
-
-# ==========================================
 # PANTALLA 1: FINANZAS Y NÓMINA
 # ==========================================
 def limpiar_form_nomina():
@@ -691,7 +591,7 @@ def limpiar_form_nomina():
 if 'form_id_nomina' not in st.session_state:
     st.session_state.form_id_nomina = 0
 
-elif st.session_state.menu_actual == "Finanzas":
+if st.session_state.menu_actual == "Finanzas":
     st.markdown("### Área de Finanzas y Recursos Humanos")
     if st.session_state.acceso_finanzas == "ninguno":
         with st.container(border=True):
@@ -873,19 +773,14 @@ elif st.session_state.menu_actual == "Finanzas":
 # ==========================================
 elif st.session_state.menu_actual == "Presupuestos":
     st.markdown("### Gestión de Presupuestos y Cotizaciones")
-    
-    if 'form_id_presup' not in st.session_state:
-        st.session_state.form_id_presup = 0
-    fid_p = st.session_state.form_id_presup
-    
     with st.container(border=True):
         with st.expander("➕ Crear Nueva Cotización / Presupuesto", expanded=False):
-            tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True, key=f"tipo_p_{fid_p}")
+            tipo_pres = st.radio("Clasificación de la Venta:", ["Asociada a un Proyecto", "Venta de Productos (Independiente)"], horizontal=True)
             colP1, colP2 = st.columns(2)
             if tipo_pres == "Asociada a un Proyecto":
                 proyectos_existentes = st.session_state.proyectos_resumen["Proyecto"].tolist()
                 if proyectos_existentes:
-                    ref_pres = colP1.selectbox("Seleccionar Proyecto:", proyectos_existentes, key=f"sel_proy_{fid_p}")
+                    ref_pres = colP1.selectbox("Seleccionar Proyecto:", proyectos_existentes)
                     idx_pres = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == ref_pres].index[0]
                     cliente_pres = st.session_state.proyectos_resumen.at[idx_pres, "Empresa"]
                     colP2.info(f"Cliente vinculado: **{cliente_pres}**")
@@ -893,21 +788,20 @@ elif st.session_state.menu_actual == "Presupuestos":
                     st.warning("Aún no tienes proyectos creados.")
                     ref_pres, cliente_pres = None, None
             else:
-                ref_pres = colP1.text_input("Nombre del Producto o Servicio:", placeholder="Ej: Venta de 50m cable eléctrico", key=f"ref_{fid_p}")
-                cliente_pres = colP2.text_input("Nombre del Cliente:", key=f"cli_{fid_p}")
+                ref_pres = colP1.text_input("Nombre del Producto o Servicio:", placeholder="Ej: Venta de 50m cable eléctrico")
+                cliente_pres = colP2.text_input("Nombre del Cliente:")
                 
             colP3, colP4 = st.columns(2)
-            llave_monto = f"input_monto_presupuesto_{fid_p}"
-            if llave_monto not in st.session_state: st.session_state[llave_monto] = "0"
-            colP3.text_input("Monto Total Cotizado (CLP):", key=llave_monto, on_change=formatear_input, kwargs={'llave': llave_monto})
-            monto_pres = float(st.session_state[llave_monto].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+            if 'input_monto_presupuesto' not in st.session_state: st.session_state['input_monto_presupuesto'] = "0"
+            colP3.text_input("Monto Total Cotizado (CLP):", key="input_monto_presupuesto", on_change=formatear_input, kwargs={'llave': 'input_monto_presupuesto'})
+            monto_pres = float(st.session_state['input_monto_presupuesto'].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
             
-            fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY", key=f"fecha_{fid_p}")
+            fecha_pres = colP4.date_input("Fecha de Emisión:", format="DD/MM/YYYY")
             
             colP5, colP6, colP7 = st.columns(3)
-            aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada"], key=f"apr_{fid_p}")
-            orden_pres = colP6.selectbox("Respaldo de Orden:", ["Sin Orden", "Con Orden"], key=f"ord_{fid_p}")
-            num_oc_pres = colP7.text_input("N° OC (Si aplica):", placeholder="Ej: OC-1234", key=f"oc_{fid_p}")
+            aprobacion_pres = colP5.selectbox("Estado de Aprobación:", ["Pendiente", "Aprobada", "No Aprobada"])
+            orden_pres = colP6.selectbox("Respaldo de Orden:", ["Sin Orden", "Con Orden"])
+            num_oc_pres = colP7.text_input("N° OC (Si aplica):", placeholder="Ej: OC-1234")
             if not num_oc_pres: num_oc_pres = "N/A"
             
             if st.button("Guardar Presupuesto", type="primary"):
@@ -916,11 +810,11 @@ elif st.session_state.menu_actual == "Presupuestos":
                     nuevo_presupuesto = pd.DataFrame([{
                         "Tipo": tipo_pres, "Referencia": ref_pres, "Cliente": cliente_pres,
                         "Monto": monto_pres, "Aprobacion": aprobacion_pres, "Orden_Compra": orden_pres,
-                        "Num_OC": num_oc_pres, "Estado_Comercial": "📝 Presupuestada", "Fecha_Emision": str_fecha
+                        "Num_OC": num_oc_pres, "Estado_Comercial": "Presupuestada", "Fecha_Emision": str_fecha
                     }])
                     st.session_state.presupuestos = pd.concat([st.session_state.presupuestos, nuevo_presupuesto], ignore_index=True)
                     guardar_datos("Presupuestos", st.session_state.presupuestos)
-                    st.session_state.form_id_presup += 1 
+                    st.session_state['input_monto_presupuesto'] = "0"
                     st.success("Presupuesto ingresado exitosamente.")
                     st.rerun()
                 else:
@@ -931,8 +825,8 @@ elif st.session_state.menu_actual == "Presupuestos":
         if st.session_state.presupuestos.empty:
             st.info("Aún no hay cotizaciones emitidas en el sistema.")
         else:
-            opciones_estado = ["📝 Presupuestada", "🎯 Adjudicada", "🚀 En progreso", "📦 Entregada", "💳 Pagada"]
-            opciones_aprobacion = ["⏳ Pendiente", "✅ Aprobada", "❌ No Aprobada", "Pendiente", "Aprobada", "No Aprobada"]
+            opciones_estado = ["Presupuestada", "Adjudicada", "En progreso", "Entregada", "Pagada"]
+            opciones_aprobacion = ["Pendiente", "Aprobada", "No Aprobada"]
             opciones_orden = ["Sin Orden", "Con Orden"]
             
             df_pres_edit = st.data_editor(
@@ -1016,14 +910,6 @@ elif st.session_state.menu_actual == "Proyectos":
             oc_actual = st.session_state.proyectos_resumen.at[idx_proy, "Num_OC"]
             df_gastos_proy = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == proyecto_seleccionado].copy()
 
-            tareas_de_este_proyecto = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] == proyecto_seleccionado]
-            if not tareas_de_este_proyecto.empty:
-                terminadas = len(tareas_de_este_proyecto[tareas_de_este_proyecto["Estado"].str.contains("Terminada", na=False)])
-                total_t = len(tareas_de_este_proyecto)
-                porc = int((terminadas / total_t) * 100)
-                st.progress(porc / 100.0, text=f"Avance Operativo del Proyecto: {porc}% ({terminadas} de {total_t} tareas)")
-            st.write("")
-
             col_izq, col_der = st.columns([1, 2])
             with col_izq:
                 with st.container(border=True):
@@ -1054,51 +940,24 @@ elif st.session_state.menu_actual == "Proyectos":
             if st.session_state.acceso_proyectos == "admin":
                 with st.container(border=True):
                     with st.expander("💸 Asignar Personal y Cargar al Gasto (Vínculo a Operaciones)", expanded=False):
-                        st.info("💡 Puedes asignar el 100% del costo mensual del trabajador, o ingresar las horas dedicadas para calcular su costo proporcional.")
+                        st.info("💡 Al asignarle presupuesto a un trabajador aquí, lo autorizas automáticamente para ser parte del equipo en la pestaña de 'Operaciones'.")
                         df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
                         trabajadores = ["Seleccione..."] + df_liq["Trabajador"].tolist()
-                        
-                        colT1, colT2 = st.columns([1, 1])
-                        with colT1:
-                            trabajador_sel = st.selectbox("Trabajador", trabajadores)
-                            
-                            if trabajador_sel != "Seleccione...":
-                                costo_emp_trab = df_liq[df_liq["Trabajador"] == trabajador_sel]["Costo Empresa"].values[0]
-                                row_trab = st.session_state.nomina[st.session_state.nomina['Trabajador'] == trabajador_sel].iloc[0]
-                                jornada_t = float(row_trab.get('Jornada_Hrs', 44))
-                                valor_hora_costo = (costo_emp_trab / 30) * 28 / jornada_t if jornada_t > 0 else 0
-                                
-                                st.info(f"**Costo Mensual (100%):** {formato_clp(costo_emp_trab)}\n\n**Valor Hora (Aprox):** {formato_clp(valor_hora_costo)}")
-                        
-                        with colT2:
-                            if trabajador_sel != "Seleccione...":
-                                tipo_asig = st.radio("Método de Asignación:", ["100% del Mes", "Por Horas Dedicadas"])
-                                
-                                if tipo_asig == "100% del Mes":
-                                    st.write(f"Costo a imputar: **{formato_clp(costo_emp_trab)}**")
-                                    if st.button("Añadir 100% al Gasto", type="primary", use_container_width=True):
-                                        nuevo_gasto_trab = pd.DataFrame([{
-                                            "Proyecto": proyecto_seleccionado, 
-                                            "Detalle_Gasto": f"Mano de obra (100%): {trabajador_sel}", 
-                                            "Monto": costo_emp_trab
-                                        }])
-                                        st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
-                                        guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                                        st.rerun()
-                                        
-                                else:
-                                    horas_input = st.number_input("Horas a imputar al proyecto:", min_value=0.5, step=0.5, value=10.0)
-                                    costo_calc = horas_input * valor_hora_costo
-                                    st.write(f"Costo a imputar: **{formato_clp(costo_calc)}**")
-                                    if st.button("Añadir Horas al Gasto", type="primary", use_container_width=True):
-                                        nuevo_gasto_trab = pd.DataFrame([{
-                                            "Proyecto": proyecto_seleccionado, 
-                                            "Detalle_Gasto": f"Mano de obra ({horas_input} hrs): {trabajador_sel}", 
-                                            "Monto": costo_calc
-                                        }])
-                                        st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
-                                        guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                                        st.rerun()
+                        colT1, colT2, colT3 = st.columns([2, 1, 1])
+                        trabajador_sel = colT1.selectbox("Trabajador", trabajadores)
+                        if trabajador_sel != "Seleccione...":
+                            costo_emp_trab = df_liq[df_liq["Trabajador"] == trabajador_sel]["Costo Empresa"].values[0]
+                            colT2.info(f"Costo Mensual: \n**{formato_clp(costo_emp_trab)}**")
+                            llave_costo = "costo_asignado"
+                            if llave_costo not in st.session_state: st.session_state[llave_costo] = "0"
+                            colT3.text_input("A imputar al proyecto:", key=llave_costo, on_change=formatear_input, kwargs={'llave': llave_costo})
+                            monto_asig = float(st.session_state[llave_costo].replace(".", "").replace(",", "").replace("$", "").strip() or 0)
+                            if st.button("Añadir al Gasto", type="secondary") and monto_asig > 0:
+                                nuevo_gasto_trab = pd.DataFrame([{"Proyecto": proyecto_seleccionado, "Detalle_Gasto": f"Mano de obra: {trabajador_sel}", "Monto": monto_asig}])
+                                st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
+                                guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                                st.session_state[llave_costo] = "0"
+                                st.rerun()
 
             gastos_totales = pd.to_numeric(df_gastos_editados["Monto"], errors='coerce').sum()
             ganancia_proyecto = nuevo_cobro - gastos_totales
@@ -1136,241 +995,58 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.rerun()
 
 # ==========================================
-# PANTALLA 4: SEGUIMIENTO OPERATIVO (MONDAY FASE 2 & 3)
+# PANTALLA 4: SEGUIMIENTO OPERATIVO
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
-  st.markdown("#### 📊 Panel de Control y Progreso")
-        mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
-        df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
-        
-        if df_tareas_filtradas.empty:
-            st.info("No hay tareas registradas para este equipo.")
-        else:
-            df_tareas_editadas = st.data_editor(
-                df_tareas_filtradas,
-                column_config={
-                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"]),
-                },
-                disabled=["Proyecto", "Trabajador", "Tarea"],
-                hide_index=True,
-                use_container_width=True,
-                key=f"ed_tar_{proyecto_seg}"
-            )
-            
-            if st.button("💾 Guardar Progreso de Tareas", type="primary"):
-                # Sincronizamos los cambios realizados en el editor con el estado global
-                st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
-                st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
-                
-                # 🚀 Guardado real en PostgreSQL para que no se borre con F5
-                guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                st.success("Estados actualizados permanentemente.")
-                st.rerun()
-        # --- VISTAS ---
-        tab_tablero, tab_workload, tab_equipo, tab_config = st.tabs(["📌 Tablero de Tareas", "📊 Carga y Vencimientos", "👥 Equipo de Trabajo", "⚙️ Ajustes de Proyecto"])
-
-        # ==============================================
-        # VISTA 1: TABLERO DE TAREAS (KANBAN & LISTA)
-        # ==============================================
-        with tab_tablero:
-            lista_trabajadores_nomina = st.session_state.nomina["Trabajador"].tolist()
-            if not lista_trabajadores_nomina:
-                st.info("Agrega trabajadores en la pestaña de 'Finanzas' para poder asignarles tareas.")
-            else:
-                with st.expander("➕ Añadir Nueva Tarea al Tablero", expanded=False):
-                    colT1, colT2 = st.columns([1, 2])
-                    encargado_tarea = colT1.selectbox("Asignar a (Desde Nómina):", lista_trabajadores_nomina)
-                    desc_tarea = colT2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalar tablero eléctrico principal")
-                    
-                    # PRIORIDAD
-                    colT3, colT4, colT5 = st.columns([2, 2, 2])
-                    f_ini_tarea = colT3.date_input("Fecha Inicio Tarea", format="DD/MM/YYYY")
-                    f_fin_tarea = colT4.date_input("Fecha Fin Tarea", format="DD/MM/YYYY")
-                    prioridad_tarea = colT5.selectbox("Nivel de Prioridad:", ["🔥 Alta", "⚡ Media", "🧊 Baja"], index=1)
-                    
-if st.button("Crear Tarea"):
-    if desc_tarea:
-        # 1. Creamos el registro de la nueva tarea
-        nueva_tarea = pd.DataFrame([{
-            "Proyecto": proyecto_seg,
-            "Trabajador": encargado_tarea,
-            "Tarea": desc_tarea,
-            "Estado": "Pendiente"
-        }])
-        
-        # 2. La añadimos a la memoria temporal (para verla al instante)
-        st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
-        
-        # 3. 🚀 LÍNEA CRÍTICA: Forzamos el guardado real en PostgreSQL inmediatamente
-        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-        
-        st.success(f"✅ Tarea para {encargado_tarea} guardada permanentemente.")
-        st.rerun()
+    st.markdown("### ⏱️ Gestión Operativa del Proyecto")
+    proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
+    if not proyectos_lista_seg:
+        with st.container(border=True):
+            st.warning("No hay proyectos creados. Ve a la pestaña 'Proyectos' para crear tu primera obra.")
     else:
-        st.error("Escribe una descripción para la tarea.")
-
-                if tareas_proy.empty:
-                    st.info("No hay tareas registradas para este proyecto en el tablero.")
-                else:
-                    col_filt1, col_filt2 = st.columns([1, 2])
-                    trabajadores_con_tareas = tareas_proy['Trabajador'].unique().tolist()
-                    filtro_trabajador = col_filt1.selectbox("🔍 Filtrar por Asignado:", ["👥 Todos"] + trabajadores_con_tareas)
-                    
-                    tipo_vista = col_filt2.radio("Modo de Vista:", ["📌 Kanban Interactivo", "📋 Edición en Lista"], horizontal=True)
-                    st.divider()
-
-                    if filtro_trabajador != "👥 Todos":
-                        df_vista_filtrada = tareas_proy[tareas_proy['Trabajador'] == filtro_trabajador].copy()
-                        mask_reemplazo = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Trabajador"] == filtro_trabajador)
-                    else:
-                        df_vista_filtrada = tareas_proy.copy()
-                        mask_reemplazo = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
-
-                    if tipo_vista == "📌 Kanban Interactivo":
-                        col_pend, col_proc, col_term = st.columns(3)
-                        with col_pend:
-                            st.markdown("<h4 style='text-align: center; color: #ef4444;'>🔴 Pendiente</h4>", unsafe_allow_html=True)
-                            for idx, row in df_vista_filtrada[df_vista_filtrada['Estado'].str.contains('Pendiente', na=False)].iterrows():
-                                with st.container(border=True):
-                                    st.markdown(f"**{row['Tarea']}**")
-                                    st.caption(f"👤 {row['Trabajador']} | {row.get('Prioridad', '⚡ Media')} | 📅 Vence: {row['Fecha_Termino']}")
-                                    if st.button("▶️ Iniciar", key=f"start_{idx}", use_container_width=True):
-                                        st.session_state.proyectos_tareas.at[idx, 'Estado'] = '🟡 En proceso'
-                                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                                        st.rerun()
-
-                        with col_proc:
-                            st.markdown("<h4 style='text-align: center; color: #eab308;'>🟡 En proceso</h4>", unsafe_allow_html=True)
-                            for idx, row in df_vista_filtrada[df_vista_filtrada['Estado'].str.contains('proceso', na=False)].iterrows():
-                                with st.container(border=True):
-                                    st.markdown(f"**{row['Tarea']}**")
-                                    st.caption(f"👤 {row['Trabajador']} | {row.get('Prioridad', '⚡ Media')} | 📅 Vence: {row['Fecha_Termino']}")
-                                    c1, c2 = st.columns(2)
-                                    if c1.button("⏸️ Pausar", key=f"pause_{idx}", use_container_width=True):
-                                        st.session_state.proyectos_tareas.at[idx, 'Estado'] = '🔴 Pendiente'
-                                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                                        st.rerun()
-                                    if c2.button("✅ Listo", key=f"done_{idx}", use_container_width=True):
-                                        st.session_state.proyectos_tareas.at[idx, 'Estado'] = '🟢 Terminada'
-                                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                                        st.rerun()
-
-                        with col_term:
-                            st.markdown("<h4 style='text-align: center; color: #22c55e;'>🟢 Terminada</h4>", unsafe_allow_html=True)
-                            for idx, row in df_vista_filtrada[df_vista_filtrada['Estado'].str.contains('Terminada', na=False)].iterrows():
-                                with st.container(border=True):
-                                    st.markdown(f"**{row['Tarea']}**")
-                                    st.caption(f"👤 {row['Trabajador']} | {row.get('Prioridad', '⚡ Media')} | 📅 Vence: {row['Fecha_Termino']}")
-                                    if st.button("↩️ Reabrir", key=f"revert_{idx}", use_container_width=True):
-                                        st.session_state.proyectos_tareas.at[idx, 'Estado'] = '🟡 En proceso'
-                                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                                        st.rerun()
-                    else:
-                        df_vista_filtrada['Fecha_Inicio'] = pd.to_datetime(df_vista_filtrada['Fecha_Inicio'], errors='coerce').dt.date
-                        df_vista_filtrada['Fecha_Termino'] = pd.to_datetime(df_vista_filtrada['Fecha_Termino'], errors='coerce').dt.date
-
-                        df_tareas_editadas = st.data_editor(
-                            df_vista_filtrada,
-                            column_config={
-                                "Estado": st.column_config.SelectboxColumn("Estado", options=["🔴 Pendiente", "🟡 En proceso", "🟢 Terminada"]),
-                                "Prioridad": st.column_config.SelectboxColumn("Prioridad", options=["🔥 Alta", "⚡ Media", "🧊 Baja"]),
-                                "Fecha_Inicio": st.column_config.DateColumn("Inicio"),
-                                "Fecha_Termino": st.column_config.DateColumn("Fin")
-                            },
-                            disabled=["Proyecto", "Trabajador", "Tarea"], hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
-                        )
-                        
-                        if st.button("💾 Guardar Progreso de Tareas", type="primary"):
-                            df_tareas_editadas['Fecha_Inicio'] = df_tareas_editadas['Fecha_Inicio'].astype(str)
-                            df_tareas_editadas['Fecha_Termino'] = df_tareas_editadas['Fecha_Termino'].astype(str)
-                            
-                            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_reemplazo]
-                            st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
-                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                            st.success("Estados actualizados de forma segura.")
-                    
-                    st.write("")
-                    with st.expander("🗑️ Zona de Peligro: Eliminar Tareas"):
-                        lista_nombres_tareas = [f"{row['Tarea']} ({row['Trabajador']})" for index, row in df_vista_filtrada.iterrows()]
-                        if lista_nombres_tareas:
-                            tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
-                            if st.button("Eliminar Tarea Seleccionada", type="primary"):
-                                nombre_tarea = tarea_a_eliminar.rsplit(" (", 1)[0]
-                                nombre_trab = tarea_a_eliminar.rsplit(" (", 1)[1].replace(")", "")
-                                
-                                mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == nombre_tarea) & (st.session_state.proyectos_tareas["Trabajador"] == nombre_trab)
-                                st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
-                                guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                                st.success("Tarea eliminada.")
-                                st.rerun()
-
-        # ==============================================
-        # VISTA 2: CARGA DE TRABAJO Y VENCIMIENTOS (REEMPLAZA AL GANTT)
-        # ==============================================
-        with tab_workload:
-            st.markdown("#### 📊 Carga de Trabajo del Equipo")
-            st.caption("Visualiza quién está sobrecargado y qué tareas requieren atención inmediata.")
+        proyecto_seg = st.selectbox("Selecciona un Proyecto a gestionar:", proyectos_lista_seg)
+        idx_p_seg = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seg].index[0]
+        
+        with st.container(border=True):
+            st.markdown("#### 1️⃣ Cronograma General del Proyecto")
+            colF1, colF2, colF3 = st.columns(3)
+            val_ini = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"]
+            val_fin = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"]
+            val_dur = st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"]
             
-            tareas_activas = tareas_proy[~tareas_proy['Estado'].str.contains('Terminada', na=False)].copy()
+            def parse_fecha(f_str):
+                try:
+                    if pd.isna(f_str) or str(f_str).strip() in ["", "Pendiente"]: 
+                        return None
+                    return pd.to_datetime(str(f_str)).date()
+                except:
+                    return None
             
-            col_c1, col_c2 = st.columns([1, 1])
+            nuevo_ini = colF1.date_input("Fecha de Inicio:", value=parse_fecha(val_ini), format="DD/MM/YYYY")
+            nuevo_fin = colF2.date_input("Fecha de Término:", value=parse_fecha(val_fin), format="DD/MM/YYYY")
             
-            with col_c1:
-                with st.container(border=True):
-                    st.markdown("**Distribución de Tareas Activas**")
-                    if not tareas_activas.empty:
-                        carga_df = tareas_activas.groupby('Trabajador').size().reset_index(name='Tareas')
-                        grafico_carga = alt.Chart(carga_df).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#3b82f6").encode(
-                            y=alt.Y('Trabajador:N', title='', sort='-x'),
-                            x=alt.X('Tareas:Q', title='Nº Tareas Pendientes o En Proceso'),
-                            tooltip=['Trabajador', 'Tareas']
-                        ).properties(height=300)
-                        st.altair_chart(grafico_carga, use_container_width=True)
-                    else:
-                        st.success("No hay tareas activas.")
-
-            with col_c2:
-                with st.container(border=True):
-                    st.markdown("**⏰ Próximos Vencimientos**")
-                    if not tareas_activas.empty:
-                        tareas_activas['Fecha_Termino_DT'] = pd.to_datetime(tareas_activas['Fecha_Termino'], errors='coerce')
-                        tareas_urgentes = tareas_activas.sort_values(by=['Fecha_Termino_DT']).head(5)
-                        
-                        for idx, row in tareas_urgentes.iterrows():
-                            if pd.notna(row['Fecha_Termino_DT']):
-                                dias_restantes = (row['Fecha_Termino_DT'].date() - datetime.date.today()).days
-                                if dias_restantes < 0:
-                                    alerta = "🔴 **VENCIDA**"
-                                elif dias_restantes <= 2:
-                                    alerta = "🟡 **URGE**"
-                                else:
-                                    alerta = "🟢 A TIEMPO"
-                            else:
-                                alerta = "⚪ Sin fecha"
-                                
-                            st.info(f"**{row['Tarea']}** ({row.get('Prioridad', '⚡ Media')})\n\n👤 {row['Trabajador']} | 📅 {row['Fecha_Termino']} | {alerta}")
-                    else:
-                        st.success("Nada por vencer.")
-
-
-        # ==============================================
-        # VISTA 3: EQUIPO DE TRABAJO
-        # ==============================================
-        with tab_equipo:
-            st.markdown("#### Conformación del Equipo y Liderazgo")
+            nueva_dur = colF3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 3 meses")
+            if st.button("Guardar Fechas del Proyecto"):
+                str_ini = nuevo_ini.strftime('%Y-%m-%d') if nuevo_ini else "Pendiente"
+                str_fin = nuevo_fin.strftime('%Y-%m-%d') if nuevo_fin else "Pendiente"
+                
+                st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"] = str_ini
+                st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"] = str_fin
+                st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"] = nueva_dur if nueva_dur else "Pendiente"
+                guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
+                st.success("Cronograma actualizado.")
+                
+        with st.container(border=True):
+            st.markdown("#### 2️⃣ Conformación del Equipo y Liderazgo")
             gastos_proy_seg = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == proyecto_seg]
             trabajadores_financiados = []
-            
             for detalle in gastos_proy_seg["Detalle_Gasto"]:
-                detalle_str = str(detalle)
-                if detalle_str.startswith("Mano de obra"):
-                    if ":" in detalle_str:
-                        nombre = detalle_str.split(":", 1)[1].strip()
-                        if nombre not in trabajadores_financiados: 
-                            trabajadores_financiados.append(nombre)
+                if str(detalle).startswith("Mano de obra: "):
+                    nombre = str(detalle).replace("Mano de obra: ", "").strip()
+                    if nombre not in trabajadores_financiados: trabajadores_financiados.append(nombre)
                         
             if not trabajadores_financiados:
-                st.warning("⚠️ No has asignado personal a este proyecto en la pestaña Finanzas > Proyectos.")
+                st.warning("⚠️ No has asignado presupuesto de personal a este proyecto.")
             else:
                 equipo_actual = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg]
                 trabajadores_en_equipo = equipo_actual["Trabajador"].tolist()
@@ -1388,8 +1064,6 @@ if st.button("Crear Tarea"):
                 
                 mask_eq = st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg
                 df_eq_editar = st.session_state.proyectos_equipo[mask_eq]
-                
-                st.caption("Asigna los roles del equipo en terreno:")
                 df_eq_mod = st.data_editor(
                     df_eq_editar,
                     column_config={"Rol_Proyecto": st.column_config.SelectboxColumn("Rol Operativo", options=["Por definir", "Líder de Proyecto", "Supervisor", "Técnico Especialista", "Operario", "Prevencionista"], required=True)},
@@ -1401,34 +1075,49 @@ if st.button("Crear Tarea"):
                     guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
                     st.success("Roles del equipo actualizados.")
 
-        # ==============================================
-        # VISTA 4: AJUSTES (CRONOGRAMA GENERAL)
-        # ==============================================
-        with tab_config:
-            st.markdown("#### Configuración de Tiempos del Proyecto")
-            val_ini = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"]
-            val_fin = st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"]
-            val_dur = st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"]
-            
-            def parse_fecha(f_str):
-                try:
-                    if pd.isna(f_str) or str(f_str).strip() in ["", "Pendiente"]: return None
-                    return pd.to_datetime(str(f_str)).date()
-                except: return None
-            
-            c_conf1, c_conf2, c_conf3 = st.columns(3)
-            nuevo_ini = c_conf1.date_input("Fecha de Inicio Oficial:", value=parse_fecha(val_ini), format="DD/MM/YYYY")
-            nuevo_fin = c_conf2.date_input("Fecha de Término Oficial:", value=parse_fecha(val_fin), format="DD/MM/YYYY")
-            nueva_dur = c_conf3.text_input("Duración Estimada:", value="" if val_dur=="Pendiente" else val_dur, placeholder="Ej: 3 meses")
-            
-            if st.button("Guardar Fechas del Proyecto", type="primary"):
-                str_ini = nuevo_ini.strftime('%Y-%m-%d') if nuevo_ini else "Pendiente"
-                str_fin = nuevo_fin.strftime('%Y-%m-%d') if nuevo_fin else "Pendiente"
-                st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Inicio_Proy"] = str_ini
-                st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"] = str_fin
-                st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"] = nueva_dur if nueva_dur else "Pendiente"
-                guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
-                st.success("Configuración actualizada.")
+        with st.container(border=True):
+            st.markdown("#### 3️⃣ Asignación de Tareas Específicas")
+            if not trabajadores_financiados:
+                st.info("El equipo debe estar conformado para asignar tareas.")
+            else:
+                with st.expander("➕ Añadir Nueva Tarea", expanded=False):
+                    colT1, colT2 = st.columns([1, 2])
+                    encargado_tarea = colT1.selectbox("Asignar a:", trabajadores_financiados)
+                    desc_tarea = colT2.text_input("Descripción de la Tarea:", placeholder="Ej: Instalar tablero eléctrico principal")
+                    if st.button("Crear Tarea"):
+                        if desc_tarea:
+                            nueva_tarea = pd.DataFrame([{"Proyecto": proyecto_seg, "Trabajador": encargado_tarea, "Tarea": desc_tarea, "Estado": "Pendiente"}])
+                            st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
+                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                            st.success("Tarea asignada.")
+                            st.rerun()
+                        else: st.error("Escribe una descripción para la tarea.")
+
+                mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+                df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
+                if df_tareas_filtradas.empty:
+                    st.info("No hay tareas registradas para este equipo.")
+                else:
+                    df_tareas_editadas = st.data_editor(
+                        df_tareas_filtradas,
+                        column_config={"Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"])},
+                        disabled=["Proyecto", "Trabajador", "Tarea"], hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
+                    )
+                    if st.button("💾 Guardar Progreso de Tareas", type="primary"):
+                        st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_tareas]
+                        st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
+                        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                        st.success("Estados actualizados.")
+                    with st.expander("🗑️ Eliminar una Tarea"):
+                        lista_nombres_tareas = df_tareas_filtradas["Tarea"].tolist()
+                        if lista_nombres_tareas:
+                            tarea_a_eliminar = st.selectbox("Selecciona la tarea a eliminar:", lista_nombres_tareas)
+                            if st.button("Eliminar Tarea Seleccionada"):
+                                mask_eliminar = (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg) & (st.session_state.proyectos_tareas["Tarea"] == tarea_a_eliminar)
+                                st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
+                                guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                                st.success("Tarea eliminada.")
+                                st.rerun()
 
 elif st.session_state.menu_actual == "Inventario":
     st.markdown("### 📦 Control de Inventario y Activos")
@@ -1451,7 +1140,7 @@ elif st.session_state.menu_actual == "Inventario":
             if st.button("Guardar en Inventario", type="primary"):
                 if nuevo_art:
                     nuevo_serie = f"VLT-{uuid.uuid4().hex[:6].upper()}"
-                    nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": nueva_cant, "Nro_Serie": nuevo_serie, "Estado": "🟢 Disponible"}])
+                    nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": nueva_cant, "Nro_Serie": nuevo_serie, "Estado": "Disponible"}])
                     st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
                     guardar_datos("Inventario", st.session_state.inventario)
                     st.success(f"✅ Artículo añadido con éxito. **N° de Serie: {nuevo_serie}**")
@@ -1484,7 +1173,7 @@ elif st.session_state.menu_actual == "Inventario":
                 st.session_state.inventario,
                 column_config={
                     "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0),
-                    "Estado": st.column_config.SelectboxColumn("Estado", options=["🟢 Disponible", "🟡 En Uso", "🛠️ En Reparación", "❌ Extraviado", "Disponible", "En Uso", "En Reparación", "Extraviado"]),
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Disponible", "En Uso", "En Reparación", "Extraviado"]),
                     "Nro_Serie": st.column_config.TextColumn("N° de Serie (Automático)")
                 },
                 disabled=["Artículo", "Nro_Serie"], hide_index=True, use_container_width=True, key="ed_inv"
