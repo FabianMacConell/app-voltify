@@ -42,53 +42,65 @@ st.markdown(ocultar_menu_estilo, unsafe_allow_html=True)
 LOGO_URL = "logo.png"
 
 # ==========================================
-# 2. CONEXIÓN A GOOGLE SHEETS
+# 2. CONEXIÓN A BASE DE DATOS (POSTGRESQL / SUPABASE)
 # ==========================================
-def conectar_google_sheets():
-    try:
-        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        secreto = st.secrets["google_credentials"]
-        if isinstance(secreto, str): creds_dict = json.loads(secreto.strip())
-        else: creds_dict = dict(secreto)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        client = gspread.authorize(creds)
-        return client.open("Base de Datos Voltify")
-    except Exception as e:
-        st.error(f"🚨 ERROR CRÍTICO DE CONEXIÓN: {e}")
-        st.stop()
+from supabase import create_client, Client
 
-def obtener_o_crear_hoja(libro, nombre_hoja, columnas):
-    try:
-        return libro.worksheet(nombre_hoja)
-    except gspread.exceptions.WorksheetNotFound:
-        hoja = libro.add_worksheet(title=nombre_hoja, rows="100", cols=str(len(columnas)))
-        hoja.append_row(columnas)
-        return hoja
+@st.cache_resource
+def init_connection() -> Client:
+    """Inicializa la conexión con Supabase almacenándola en caché para máxima velocidad."""
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-def guardar_datos(nombre_hoja, df):
+try:
+    supabase = init_connection()
+except Exception as e:
+    st.error(f"🚨 ERROR CRÍTICO DE CONEXIÓN A POSTGRESQL: {e}")
+    st.stop()
+
+def cargar_datos(nombre_tabla, df_default):
+    """Carga los datos desde Supabase y los devuelve como un DataFrame de Pandas."""
     try:
-        libro = conectar_google_sheets()
-        df_clean = df.fillna(0)
+        # Convertimos los nombres a minúsculas porque PostgreSQL maneja mejor las tablas en minúsculas
+        tabla_pg = nombre_tabla.lower()
+        response = supabase.table(tabla_pg).select("*").execute()
         
-        columnas_str = ['RUT', 'Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie']
-        for col in columnas_str:
-            if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
-            
-        hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
-        hoja.clear()
-        hoja.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
-    except Exception as e:
-        st.error(f"Error al guardar datos: {e}")
-
-def cargar_datos(nombre_hoja, df_default):
-    try:
-        libro = conectar_google_sheets()
-        hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_default.columns.tolist())
-        datos = hoja.get_all_records()
-        if not datos: return df_default
-        return pd.DataFrame(datos)
-    except Exception:
+        if response.data:
+            df = pd.DataFrame(response.data)
+            # Limpiamos columnas de ID internas si existen para no afectar la UI
+            if 'id' in df.columns:
+                df = df.drop(columns=['id'])
+            return df
         return df_default
+    except Exception as e:
+        st.error(f"Error al cargar datos de {nombre_tabla}: {e}")
+        return df_default
+
+def guardar_datos(nombre_tabla, df):
+    """Guarda el DataFrame en Supabase. En este MVP, limpiamos y reinsertamos emulando la lógica anterior."""
+    try:
+        tabla_pg = nombre_tabla.lower()
+        df_clean = df.fillna(0).copy()
+        
+        # Formatear columnas de texto y fechas para que PostgreSQL las reciba correctamente
+        columnas_str = ['Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 
+                        'Fecha_Emision', 'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 
+                        'Duracion_Proy', 'Nro_Serie', 'Aprobacion', 'Orden_Compra', 'Estado_Comercial']
+        for col in columnas_str:
+            if col in df_clean.columns: 
+                df_clean[col] = df_clean[col].astype(str)
+                
+        # 1. Vaciar tabla actual (Emulación del comportamiento clear de Google Sheets)
+        supabase.table(tabla_pg).delete().neq("id" if "id" in df.columns else "Proyecto" if tabla_pg == "proyectos_resumen" else "Trabajador", "0").execute()
+        
+        # 2. Insertar nuevos registros
+        if not df_clean.empty:
+            registros = df_clean.to_dict(orient='records')
+            supabase.table(tabla_pg).insert(registros).execute()
+            
+    except Exception as e:
+        st.error(f"Error al guardar datos en PostgreSQL ({nombre_tabla}): {e}")
 
 # ==========================================
 # 3. DATOS BASE Y CÁLCULOS
