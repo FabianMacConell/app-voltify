@@ -1181,24 +1181,26 @@ elif st.session_state.menu_actual == "Operaciones":
                     f_fin_tarea = colT4.date_input("Fecha Fin Tarea", format="DD/MM/YYYY")
                     prioridad_tarea = colT5.selectbox("Nivel de Prioridad:", ["🔥 Alta", "⚡ Media", "🧊 Baja"], index=1)
                     
-                    if st.button("Crear Tarea", use_container_width=True):
-                        if desc_tarea:
-                            str_ini_t = f_ini_tarea.strftime('%Y-%m-%d')
-                            str_fin_t = f_fin_tarea.strftime('%Y-%m-%d')
-                            nueva_tarea = pd.DataFrame([{
-                                "Proyecto": proyecto_seg, 
-                                "Trabajador": encargado_tarea, 
-                                "Tarea": desc_tarea, 
-                                "Estado": "🔴 Pendiente",
-                                "Fecha_Inicio": str_ini_t,
-                                "Fecha_Termino": str_fin_t,
-                                "Prioridad": prioridad_tarea
-                            }])
-                            st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
-                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
-                            st.success("Tarea asignada.")
-                            st.rerun()
-                        else: st.error("Escribe una descripción para la tarea.")
+if st.button("Crear Tarea"):
+    if desc_tarea:
+        # 1. Creamos el registro de la nueva tarea
+        nueva_tarea = pd.DataFrame([{
+            "Proyecto": proyecto_seg,
+            "Trabajador": encargado_tarea,
+            "Tarea": desc_tarea,
+            "Estado": "Pendiente"
+        }])
+        
+        # 2. La añadimos a la memoria temporal (para verla al instante)
+        st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
+        
+        # 3. 🚀 LÍNEA CRÍTICA: Forzamos el guardado real en PostgreSQL inmediatamente
+        guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+        
+        st.success(f"✅ Tarea para {encargado_tarea} guardada permanentemente.")
+        st.rerun()
+    else:
+        st.error("Escribe una descripción para la tarea.")
 
                 if tareas_proy.empty:
                     st.info("No hay tareas registradas para este proyecto en el tablero.")
