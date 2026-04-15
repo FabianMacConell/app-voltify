@@ -89,18 +89,23 @@ def guardar_datos(nombre_tabla, df):
             if col in df_clean.columns: 
                 df_clean[col] = df_clean[col].astype(str)
                 
-        # --- NUEVA LÓGICA INTELIGENTE ---
-        # Determinar la columna principal correcta según la tabla que estemos guardando
-        if "id" in df_clean.columns:
-            columna_clave = "id"
+        # Seguridad: Quitamos el 'id' del DataFrame para que PostgreSQL lo genere limpio y sin choques
+        if 'id' in df_clean.columns:
+            df_clean = df_clean.drop(columns=['id'])
+                
+        # --- LÓGICA INTELIGENTE DEFINITIVA ---
+        # PostgreSQL necesita saber qué columna usar para limpiar la tabla entera.
+        if tabla_pg == "nomina_personal":
+            columna_clave = "Trabajador"
         elif tabla_pg == "proyectos_resumen":
             columna_clave = "Proyecto"
         elif tabla_pg == "inventario":
             columna_clave = "Nro_Serie"
         else:
-            columna_clave = "Trabajador" # Aplica para nomina_personal
+            # presupuestos, proyectos_gastos, proyectos_equipo, proyectos_tareas, gastos_fijos
+            columna_clave = "id"
             
-        # 1. Vaciar tabla actual usando la clave correcta
+        # 1. Vaciar tabla actual usando la clave correcta (Emulando el clear de Sheets)
         supabase.table(tabla_pg).delete().neq(columna_clave, "0").execute()
         
         # 2. Insertar nuevos registros
