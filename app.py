@@ -1139,18 +1139,23 @@ elif st.session_state.menu_actual == "Proyectos":
 # PANTALLA 4: SEGUIMIENTO OPERATIVO (MONDAY FASE 2 & 3)
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
-    st.header("⏱️ Gestión de Operaciones")
-    proyectos_lista = st.session_state.proyectos_resumen["Proyecto"].tolist()
-    
-    if not proyectos_lista:
-        st.info("Crea un proyecto primero en la pestaña de Proyectos.")
-    else:
-        proyecto_seg = st.selectbox("Seleccionar Proyecto", proyectos_lista)
-
-
-
+  st.markdown("#### 📊 Panel de Control y Progreso")
         mask_tareas = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
         df_tareas_filtradas = st.session_state.proyectos_tareas[mask_tareas].copy()
+        
+        if df_tareas_filtradas.empty:
+            st.info("No hay tareas registradas para este equipo.")
+        else:
+            df_tareas_editadas = st.data_editor(
+                df_tareas_filtradas,
+                column_config={
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=["Pendiente", "En proceso", "Terminada"]),
+                },
+                disabled=["Proyecto", "Trabajador", "Tarea"],
+                hide_index=True,
+                use_container_width=True,
+                key=f"ed_tar_{proyecto_seg}"
+            )
             
             if st.button("💾 Guardar Progreso de Tareas", type="primary"):
                 # Sincronizamos los cambios realizados en el editor con el estado global
