@@ -89,8 +89,19 @@ def guardar_datos(nombre_tabla, df):
             if col in df_clean.columns: 
                 df_clean[col] = df_clean[col].astype(str)
                 
-        # 1. Vaciar tabla actual (Emulación del comportamiento clear de Google Sheets)
-        supabase.table(tabla_pg).delete().neq("id" if "id" in df.columns else "Proyecto" if tabla_pg == "proyectos_resumen" else "Trabajador", "0").execute()
+        # --- NUEVA LÓGICA INTELIGENTE ---
+        # Determinar la columna principal correcta según la tabla que estemos guardando
+        if "id" in df_clean.columns:
+            columna_clave = "id"
+        elif tabla_pg == "proyectos_resumen":
+            columna_clave = "Proyecto"
+        elif tabla_pg == "inventario":
+            columna_clave = "Nro_Serie"
+        else:
+            columna_clave = "Trabajador" # Aplica para nomina_personal
+            
+        # 1. Vaciar tabla actual usando la clave correcta
+        supabase.table(tabla_pg).delete().neq(columna_clave, "0").execute()
         
         # 2. Insertar nuevos registros
         if not df_clean.empty:
