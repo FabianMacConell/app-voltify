@@ -126,8 +126,14 @@ if 'proyectos_resumen' not in st.session_state:
     st.session_state.proyectos_resumen = cargar_datos("Proyectos_Resumen", df_resumen_base)
 
 if 'proyectos_gastos' not in st.session_state:
-    df_gastos_base = pd.DataFrame(columns=["Proyecto", "Detalle_Gasto", "Monto"])
+    df_gastos_base = pd.DataFrame(columns=["Proyecto", "Detalle_Gasto", "Monto", "Dias_Asignados"])
     st.session_state.proyectos_gastos = cargar_datos("Proyectos_Gastos", df_gastos_base)
+
+if 'Dias_Asignados' not in st.session_state.proyectos_gastos.columns:
+    st.session_state.proyectos_gastos['Dias_Asignados'] = 0
+
+# Días hábiles de referencia para imputación proporcional de costo mensual (asignación de personal en proyectos)
+DIAS_MES_REFERENCIA_ASIGNACION = 22
 
 if 'proyectos_equipo' not in st.session_state:
     df_equipo_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Rol_Proyecto"])
@@ -1185,7 +1191,7 @@ elif st.session_state.menu_actual == "Proyectos":
                                 "Num_OC": oc_final, "Cobro": 0, "Fecha_Inicio_Proy": "Pendiente", 
                                 "Fecha_Termino_Proy": "Pendiente", "Duracion_Proy": "Pendiente"
                             }])
-                            nuevo_gasto = pd.DataFrame([{"Proyecto": nombre_p, "Detalle_Gasto": "Materiales iniciales", "Monto": 0}])
+                            nuevo_gasto = pd.DataFrame([{"Proyecto": nombre_p, "Detalle_Gasto": "Materiales iniciales", "Monto": 0, "Dias_Asignados": 0}])
                             st.session_state.proyectos_resumen = pd.concat([st.session_state.proyectos_resumen, nuevo_resumen], ignore_index=True)
                             st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto], ignore_index=True)
                             guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
@@ -1237,21 +1243,39 @@ elif st.session_state.menu_actual == "Proyectos":
                 with st.container(border=True):
                     st.write("#### Gastos Desglosados")
                     if st.session_state.acceso_proyectos == "admin":
-                        df_gastos_editados = st.data_editor(df_gastos_proy[["Detalle_Gasto", "Monto"]], num_rows="dynamic", use_container_width=True)
+                        cols_g = ["Detalle_Gasto", "Monto", "Dias_Asignados"]
+                        for c in cols_g:
+                            if c not in df_gastos_proy.columns:
+                                df_gastos_proy[c] = 0 if c == "Dias_Asignados" else ""
+                        df_gastos_editados = st.data_editor(
+                            df_gastos_proy[cols_g],
+                            column_config={
+                                "Monto": st.column_config.NumberColumn("Monto (CLP)", min_value=0, format="%.0f"),
+                                "Dias_Asignados": st.column_config.NumberColumn("Días asignados", min_value=0.0, step=0.5, format="%.1f"),
+                            },
+                            num_rows="dynamic",
+                            use_container_width=True,
+                        )
                     else:
-                        df_gastos_editados = df_gastos_proy[["Detalle_Gasto", "Monto"]]
+                        cols_show = [c for c in ["Detalle_Gasto", "Monto", "Dias_Asignados"] if c in df_gastos_proy.columns]
+                        if not cols_show:
+                            cols_show = ["Detalle_Gasto", "Monto"]
+                        df_gastos_editados = df_gastos_proy[cols_show]
                         st.dataframe(df_gastos_editados, use_container_width=True)
 
             if st.session_state.acceso_proyectos == "admin":
                 with st.container(border=True):
                     with st.expander("💸 Asignar Personal y Cargar al Gasto (Vínculo a Operaciones)", expanded=False):
-                        st.info("💡 Puedes asignar el 100% del costo mensual del trabajador, o ingresar las horas dedicadas para calcular su costo proporcional.")
+                        st.info(
+                            "💡 Imputación por **días** respecto a **22 días hábiles** de referencia: el costo mensual del trabajador se reparte "
+                            f"proporcionalmente (100% = {DIAS_MES_REFERENCIA_ASIGNACION} días = mes completo). También puedes cargar por horas."
+                        )
                         df_liq, _ = calcular_liquidaciones(st.session_state.nomina)
                         trabajadores = ["Seleccione..."] + df_liq["Trabajador"].tolist()
                         
                         colT1, colT2 = st.columns([1, 1])
                         with colT1:
-                            trabajador_sel = st.selectbox("Trabajador", trabajadores)
+                            trabajador_sel = st.selectbox("Trabajador", trabajadores, key=f"pers_sel_{proyecto_seleccionado}")
                             
                             if trabajador_sel != "Seleccione...":
                                 costo_emp_trab = df_liq[df_liq["Trabajador"] == trabajador_sel]["Costo Empresa"].values[0]
@@ -1259,33 +1283,61 @@ elif st.session_state.menu_actual == "Proyectos":
                                 jornada_t = float(row_trab.get('Jornada_Hrs', 44))
                                 valor_hora_costo = (costo_emp_trab / 30) * 28 / jornada_t if jornada_t > 0 else 0
                                 
-                                st.info(f"**Costo Mensual (100%):** {formato_clp(costo_emp_trab)}\n\n**Valor Hora (Aprox):** {formato_clp(valor_hora_costo)}")
+                                st.info(
+                                    f"**Costo mensual (referencia {DIAS_MES_REFERENCIA_ASIGNACION} días):** {formato_clp(costo_emp_trab)}\n\n"
+                                    f"**Valor hora (aprox.):** {formato_clp(valor_hora_costo)}"
+                                )
                         
                         with colT2:
                             if trabajador_sel != "Seleccione...":
-                                tipo_asig = st.radio("Método de Asignación:", ["100% del Mes", "Por Horas Dedicadas"])
+                                tipo_asig = st.radio(
+                                    "Método de asignación:",
+                                    ["Por días al mes", "Por horas dedicadas"],
+                                    key=f"pers_metodo_{proyecto_seleccionado}",
+                                )
                                 
-                                if tipo_asig == "100% del Mes":
-                                    st.write(f"Costo a imputar: **{formato_clp(costo_emp_trab)}**")
-                                    if st.button("Añadir 100% al Gasto", type="primary", use_container_width=True):
+                                if tipo_asig == "Por días al mes":
+                                    asignar_full = st.checkbox(
+                                        "Asignar al 100%",
+                                        value=False,
+                                        help=f"Equivale a {DIAS_MES_REFERENCIA_ASIGNACION} días hábiles de referencia y al costo mensual completo.",
+                                        key=f"pers_100_{proyecto_seleccionado}",
+                                    )
+                                    dias_manual = st.number_input(
+                                        "Días (manual)",
+                                        min_value=0.5,
+                                        max_value=366.0,
+                                        step=0.5,
+                                        value=10.0,
+                                        disabled=asignar_full,
+                                        key=f"pers_dias_{proyecto_seleccionado}",
+                                    )
+                                    dias_efectivos = float(DIAS_MES_REFERENCIA_ASIGNACION) if asignar_full else float(dias_manual)
+                                    costo_dias = costo_emp_trab * (dias_efectivos / DIAS_MES_REFERENCIA_ASIGNACION)
+                                    st.caption(
+                                        f"Días utilizados en el cálculo: **{dias_efectivos:g}** (base {DIAS_MES_REFERENCIA_ASIGNACION} días hábiles)."
+                                    )
+                                    st.write(f"Costo a imputar: **{formato_clp(costo_dias)}**")
+                                    if st.button("Añadir cargo por días al gasto", type="primary", use_container_width=True, key=f"btn_dias_{proyecto_seleccionado}"):
                                         nuevo_gasto_trab = pd.DataFrame([{
-                                            "Proyecto": proyecto_seleccionado, 
-                                            "Detalle_Gasto": f"Mano de obra (100%): {trabajador_sel}", 
-                                            "Monto": costo_emp_trab
+                                            "Proyecto": proyecto_seleccionado,
+                                            "Detalle_Gasto": f"Mano de obra ({dias_efectivos:g} días): {trabajador_sel}",
+                                            "Monto": costo_dias,
+                                            "Dias_Asignados": dias_efectivos,
                                         }])
                                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
                                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                                         st.rerun()
-                                        
                                 else:
-                                    horas_input = st.number_input("Horas a imputar al proyecto:", min_value=0.5, step=0.5, value=10.0)
+                                    horas_input = st.number_input("Horas a imputar al proyecto:", min_value=0.5, step=0.5, value=10.0, key=f"pers_hrs_{proyecto_seleccionado}")
                                     costo_calc = horas_input * valor_hora_costo
                                     st.write(f"Costo a imputar: **{formato_clp(costo_calc)}**")
-                                    if st.button("Añadir Horas al Gasto", type="primary", use_container_width=True):
+                                    if st.button("Añadir horas al gasto", type="primary", use_container_width=True, key=f"btn_hrs_{proyecto_seleccionado}"):
                                         nuevo_gasto_trab = pd.DataFrame([{
-                                            "Proyecto": proyecto_seleccionado, 
-                                            "Detalle_Gasto": f"Mano de obra ({horas_input} hrs): {trabajador_sel}", 
-                                            "Monto": costo_calc
+                                            "Proyecto": proyecto_seleccionado,
+                                            "Detalle_Gasto": f"Mano de obra ({horas_input} hrs): {trabajador_sel}",
+                                            "Monto": costo_calc,
+                                            "Dias_Asignados": 0,
                                         }])
                                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
                                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
