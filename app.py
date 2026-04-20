@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import datetime
+import calendar
 import os
 import tempfile
 import altair as alt
@@ -133,13 +134,15 @@ if 'proyectos_equipo' not in st.session_state:
     st.session_state.proyectos_equipo = cargar_datos("Proyectos_Equipo", df_equipo_base)
 
 if 'proyectos_tareas' not in st.session_state:
-    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino"])
+    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino", "Dias_Duracion"])
     st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
 
 if 'Fecha_Inicio' not in st.session_state.proyectos_tareas.columns:
     st.session_state.proyectos_tareas['Fecha_Inicio'] = datetime.date.today().strftime('%Y-%m-%d')
 if 'Fecha_Termino' not in st.session_state.proyectos_tareas.columns:
     st.session_state.proyectos_tareas['Fecha_Termino'] = datetime.date.today().strftime('%Y-%m-%d')
+if 'Dias_Duracion' not in st.session_state.proyectos_tareas.columns:
+    st.session_state.proyectos_tareas['Dias_Duracion'] = float('nan')
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
@@ -155,6 +158,195 @@ if 'ultima_etiqueta' not in st.session_state:
 def formato_clp(valor):
     try: return f"${int(valor):,.0f}".replace(",", ".")
     except (ValueError, TypeError): return "$0"
+
+# --- Capacidad mensual de trabajadores (días hábiles) ---
+def dias_habiles_en_mes(year, month):
+    """Cantidad de lunes a viernes en el mes."""
+    last = calendar.monthrange(year, month)[1]
+    n = 0
+    for d in range(1, last + 1):
+        if datetime.date(year, month, d).weekday() < 5:
+            n += 1
+    return max(n, 1)
+
+def contar_dias_habiles_rango(f_ini, f_fin):
+    """Días hábiles entre dos fechas (inclusive)."""
+    if f_ini is None or f_fin is None or f_fin < f_ini:
+        return 0
+    n = 0
+    cur = f_ini
+    while cur <= f_fin:
+        if cur.weekday() < 5:
+            n += 1
+        cur += datetime.timedelta(days=1)
+    return n
+
+def parse_fecha_celda(val):
+    if val is None:
+        return None
+    try:
+        if isinstance(val, float) and pd.isna(val):
+            return None
+    except Exception:
+        pass
+    if isinstance(val, datetime.datetime):
+        return val.date()
+    if isinstance(val, datetime.date):
+        return val
+    try:
+        s = str(val).strip()
+        if not s or s.lower() == "pendiente":
+            return None
+        return pd.to_datetime(s, errors="coerce").date()
+    except Exception:
+        return None
+
+def tarea_activa_capacidad(estado):
+    s = str(estado or "")
+    return "Terminada" not in s
+
+def carga_trabajador_mes(df_tareas, trabajador, year, month):
+    """
+    Suma días hábiles asignados al trabajador en el mes, en todos los proyectos.
+    Reparte la duración (Dias_Duracion o días hábiles del rango) proporcionalmente
+    según los días hábiles del rango que caen en ese mes.
+    """
+    df = df_tareas[df_tareas["Trabajador"] == trabajador]
+    total = 0.0
+    for _, row in df.iterrows():
+        if not tarea_activa_capacidad(row.get("Estado")):
+            continue
+        f_ini = parse_fecha_celda(row.get("Fecha_Inicio"))
+        f_fin = parse_fecha_celda(row.get("Fecha_Termino"))
+        if f_ini is None or f_fin is None:
+            continue
+        if f_fin < f_ini:
+            f_ini, f_fin = f_fin, f_ini
+        wd_total = contar_dias_habiles_rango(f_ini, f_fin)
+        first = datetime.date(year, month, 1)
+        last = datetime.date(year, month, calendar.monthrange(year, month)[1])
+        d0 = max(f_ini, first)
+        d1 = min(f_fin, last)
+        wd_mes = contar_dias_habiles_rango(d0, d1) if d0 <= d1 else 0
+        if wd_mes <= 0:
+            continue
+        dd = row.get("Dias_Duracion")
+        try:
+            dd = float(dd) if dd is not None and str(dd).strip() != "" and not (isinstance(dd, float) and pd.isna(dd)) else None
+        except (ValueError, TypeError):
+            dd = None
+        if dd is not None and dd > 0:
+            total += dd * (wd_mes / max(wd_total, 1e-9))
+        else:
+            total += wd_mes
+    return total
+
+MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+def etiqueta_mes_corto(year, month):
+    return f"{MESES_CORTOS[month - 1]} {year}"
+
+def avanzar_mes(year, month, delta=1):
+    m0 = month - 1 + delta
+    y = year + m0 // 12
+    m = m0 % 12 + 1
+    return y, m
+
+def tabla_capacidad_personal(df_tareas, lista_trabajadores, year, month):
+    """Una fila por trabajador: tope mensual, días asignados, balance y %."""
+    cap = dias_habiles_en_mes(year, month)
+    rows = []
+    for trab in sorted(lista_trabajadores):
+        asign = carga_trabajador_mes(df_tareas, trab, year, month)
+        disp = cap - asign
+        pct = (asign / cap) * 100 if cap else 0.0
+        rows.append({
+            "Trabajador": trab,
+            "Días hábiles (tope mes)": cap,
+            "Días asignados": round(asign, 1),
+            "Días disponibles": round(disp, 1),
+            "% vs capacidad": round(pct, 1),
+        })
+    return pd.DataFrame(rows)
+
+def tabla_proyeccion_carga_meses(df_tareas, lista_trabajadores, year, month, n_meses):
+    """Columnas por mes: días asignados estimados por trabajador."""
+    rows = []
+    for trab in sorted(lista_trabajadores):
+        row = {"Trabajador": trab}
+        y, m = year, month
+        for _ in range(n_meses):
+            lab = etiqueta_mes_corto(y, m)
+            row[lab] = round(carga_trabajador_mes(df_tareas, trab, y, m), 1)
+            y, m = avanzar_mes(y, m, 1)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+def tabla_referencia_dias_habiles(year, month, n_meses):
+    """Días hábiles de calendario por mes (referencia para la estimación)."""
+    rows = []
+    y, m = year, month
+    for _ in range(n_meses):
+        rows.append({
+            "Mes": etiqueta_mes_corto(y, m),
+            "Días hábiles (lun–vie)": dias_habiles_en_mes(y, m),
+        })
+        y, m = avanzar_mes(y, m, 1)
+    return pd.DataFrame(rows)
+
+def render_panel_capacidad_trabajadores(df_tareas, lista_trabajadores, key_suffix="cap"):
+    """Selector de mes + tabla resumen (días asignados, disponibles, %). Sin alertas de sobrecarga."""
+    hoy = datetime.date.today()
+    col_a, col_b = st.columns(2)
+    meses_nombres = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ]
+    with col_a:
+        y = st.number_input("Año", 2020, 2035, hoy.year, key=f"cap_y_{key_suffix}")
+    with col_b:
+        m = st.selectbox(
+            "Mes",
+            list(range(1, 13)),
+            format_func=lambda i: meses_nombres[i - 1],
+            index=hoy.month - 1,
+            key=f"cap_m_{key_suffix}",
+        )
+    cap_mes = dias_habiles_en_mes(y, m)
+    st.caption(
+        f"Mes de referencia: **{meses_nombres[m - 1]} {y}** — tope **{cap_mes}** días hábiles. "
+        "Los **días asignados** suman tareas **pendientes y en proceso** en todos los proyectos (reparto por fechas)."
+    )
+    if not lista_trabajadores:
+        st.info("No hay trabajadores en nómina para mostrar capacidad.")
+        return
+    df_tab = tabla_capacidad_personal(df_tareas, lista_trabajadores, y, m)
+    st.dataframe(df_tab, use_container_width=True, hide_index=True)
+
+def _migrar_dias_duracion_tareas(df):
+    df = df.copy()
+    if 'Dias_Duracion' not in df.columns:
+        df['Dias_Duracion'] = float('nan')
+    for idx in df.index:
+        raw = df.at[idx, 'Dias_Duracion']
+        try:
+            if raw is not None and str(raw).strip() != "" and not (isinstance(raw, float) and pd.isna(raw)):
+                float(raw)
+                continue
+        except (ValueError, TypeError):
+            pass
+        fi = parse_fecha_celda(df.at[idx, 'Fecha_Inicio'])
+        ff = parse_fecha_celda(df.at[idx, 'Fecha_Termino'])
+        if fi and ff:
+            if ff < fi:
+                fi, ff = ff, fi
+            wd = contar_dias_habiles_rango(fi, ff)
+            df.at[idx, 'Dias_Duracion'] = float(max(1, wd))
+        else:
+            df.at[idx, 'Dias_Duracion'] = 1.0
+    return df
+
+st.session_state.proyectos_tareas = _migrar_dias_duracion_tareas(st.session_state.proyectos_tareas)
 
 def formatear_input(llave):
     val = str(st.session_state[llave]).replace(".", "").replace(",", "").replace("$", "").replace(" ", "").strip()
@@ -646,7 +838,9 @@ elif st.session_state.menu_actual == "Finanzas":
     else:
         if st.session_state.acceso_finanzas == "observador": st.warning("👁️ MODO OBSERVADOR: Visualización en modo lectura.")
             
-        tab_nomina, tab_fijos, tab_facturas = st.tabs(["👥 Nómina y Liquidaciones", "🏢 Gastos Fijos Operativos", "🧾 Emisión de Facturas"])
+        tab_nomina, tab_fijos, tab_facturas, tab_rendimiento = st.tabs(
+            ["👥 Nómina y Liquidaciones", "🏢 Gastos Fijos Operativos", "🧾 Emisión de Facturas", "📊 Rendimiento y capacidad"]
+        )
         
         with tab_nomina:
             with st.container(border=True):
@@ -807,6 +1001,64 @@ elif st.session_state.menu_actual == "Finanzas":
                     else:
                         st.info("Aún no tienes proyectos creados.")
 
+        with tab_rendimiento:
+            with st.container(border=True):
+                st.subheader("Rendimiento y capacidad del personal")
+                st.caption(
+                    "Días **asignados** = carga estimada en días hábiles según tareas **pendientes y en proceso** "
+                    "(todos los proyectos). Los **días disponibles** son el balance frente al tope de días hábiles del mes."
+                )
+                lista_rend = st.session_state.nomina["Trabajador"].tolist()
+                if not lista_rend:
+                    st.info("Registra trabajadores en la pestaña de Nómina para ver esta vista.")
+                else:
+                    hoy_r = datetime.date.today()
+                    meses_nombres_r = [
+                        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+                    ]
+                    cr1, cr2 = st.columns(2)
+                    with cr1:
+                        yr_r = st.number_input("Año", 2020, 2035, hoy_r.year, key="fin_rend_y")
+                    with cr2:
+                        mes_r = st.selectbox(
+                            "Mes (detalle)",
+                            list(range(1, 13)),
+                            format_func=lambda i: meses_nombres_r[i - 1],
+                            index=hoy_r.month - 1,
+                            key="fin_rend_m",
+                        )
+                    df_det = tabla_capacidad_personal(st.session_state.proyectos_tareas, lista_rend, yr_r, mes_r)
+                    st.markdown("##### Detalle por persona (mes seleccionado)")
+                    st.dataframe(df_det, use_container_width=True, hide_index=True)
+
+                    st.divider()
+                    st.markdown("##### Estimación multi-mes (proyección de carga)")
+                    st.caption(
+                        "Misma lógica mes a mes: útil para anticipar picos. La fila inferior muestra los días hábiles de calendario por mes."
+                    )
+                    cp1, cp2, cp3 = st.columns(3)
+                    with cp1:
+                        y0 = st.number_input("Año inicio proyección", 2020, 2035, hoy_r.year, key="fin_proy_y0")
+                    with cp2:
+                        m0 = st.selectbox(
+                            "Mes inicio",
+                            list(range(1, 13)),
+                            format_func=lambda i: meses_nombres_r[i - 1],
+                            index=hoy_r.month - 1,
+                            key="fin_proy_m0",
+                        )
+                    with cp3:
+                        n_meses_proj = st.number_input("Cantidad de meses", min_value=1, max_value=12, value=3, step=1, key="fin_proy_n")
+
+                    df_ref = tabla_referencia_dias_habiles(y0, m0, int(n_meses_proj))
+                    st.dataframe(df_ref, use_container_width=True, hide_index=True)
+
+                    df_proj = tabla_proyeccion_carga_meses(
+                        st.session_state.proyectos_tareas, lista_rend, y0, m0, int(n_meses_proj)
+                    )
+                    st.dataframe(df_proj, use_container_width=True, hide_index=True)
+
 # ==========================================
 # PANTALLA 2: PRESUPUESTOS Y COTIZACIONES
 # ==========================================
@@ -957,6 +1209,12 @@ elif st.session_state.menu_actual == "Proyectos":
                 st.progress(porc / 100.0, text=f"Avance Operativo del Proyecto: {porc}% ({terminadas} de {total_t} tareas)")
             st.write("")
 
+            with st.container(border=True):
+                st.markdown("##### 📊 Capacidad del equipo por mes")
+                lista_nom_cap = st.session_state.nomina["Trabajador"].tolist()
+                render_panel_capacidad_trabajadores(st.session_state.proyectos_tareas, lista_nom_cap, key_suffix="fin_proy")
+            st.write("")
+
             col_izq, col_der = st.columns([1, 2])
             with col_izq:
                 with st.container(border=True):
@@ -1091,6 +1349,12 @@ elif st.session_state.menu_actual == "Operaciones":
         st.markdown(f"#### 🚀 Proyecto: {proyecto_seg}")
         st.progress(porc / 100.0, text=f"Progreso Global: {porc}% ({terminadas}/{total_t} Tareas Completadas)")
         st.write("")
+
+        with st.container(border=True):
+            st.markdown("##### 📊 Capacidad del equipo por mes")
+            lista_nom_cap = st.session_state.nomina["Trabajador"].tolist()
+            render_panel_capacidad_trabajadores(st.session_state.proyectos_tareas, lista_nom_cap, key_suffix="ops_wos")
+        st.write("")
         
         # --- VISTAS (PESTAÑAS ESTILO MONDAY) ---
         tab_tablero, tab_gantt, tab_equipo, tab_config = st.tabs(["📌 Tablero de Tareas", "📅 Cronograma (Gantt)", "👥 Equipo de Trabajo", "⚙️ Ajustes de Proyecto"])
@@ -1111,6 +1375,18 @@ elif st.session_state.menu_actual == "Operaciones":
                     colT3, colT4 = st.columns(2)
                     f_ini_tarea = colT3.date_input("Fecha Inicio Tarea", format="DD/MM/YYYY")
                     f_fin_tarea = colT4.date_input("Fecha Fin Tarea", format="DD/MM/YYYY")
+                    fi_ok, ff_ok = f_ini_tarea, f_fin_tarea
+                    if ff_ok < fi_ok:
+                        fi_ok, ff_ok = ff_ok, fi_ok
+                    wd_sugeridos = max(1, contar_dias_habiles_rango(fi_ok, ff_ok))
+                    dias_duracion_nueva = st.number_input(
+                        "Días de duración (hábiles)",
+                        min_value=0.5,
+                        step=0.5,
+                        value=float(wd_sugeridos),
+                        help="Se imputan a la capacidad mensual del trabajador (suma en todos los proyectos).",
+                        key=f"dur_nueva_{proyecto_seg}",
+                    )
                     
                     if st.button("Crear Tarea", use_container_width=True):
                         if desc_tarea:
@@ -1122,7 +1398,8 @@ elif st.session_state.menu_actual == "Operaciones":
                                 "Tarea": desc_tarea, 
                                 "Estado": "🔴 Pendiente",
                                 "Fecha_Inicio": str_ini_t,
-                                "Fecha_Termino": str_fin_t
+                                "Fecha_Termino": str_fin_t,
+                                "Dias_Duracion": float(dias_duracion_nueva),
                             }])
                             st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True)
                             guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
@@ -1190,13 +1467,17 @@ elif st.session_state.menu_actual == "Operaciones":
                         # VISTA LISTA
                         df_vista_filtrada['Fecha_Inicio'] = pd.to_datetime(df_vista_filtrada['Fecha_Inicio'], errors='coerce').dt.date
                         df_vista_filtrada['Fecha_Termino'] = pd.to_datetime(df_vista_filtrada['Fecha_Termino'], errors='coerce').dt.date
+                        if 'Dias_Duracion' not in df_vista_filtrada.columns:
+                            df_vista_filtrada['Dias_Duracion'] = 1.0
+                        df_vista_filtrada['Dias_Duracion'] = pd.to_numeric(df_vista_filtrada['Dias_Duracion'], errors='coerce').fillna(1.0)
 
                         df_tareas_editadas = st.data_editor(
                             df_vista_filtrada,
                             column_config={
                                 "Estado": st.column_config.SelectboxColumn("Estado", options=["🔴 Pendiente", "🟡 En proceso", "🟢 Terminada"]),
                                 "Fecha_Inicio": st.column_config.DateColumn("Inicio"),
-                                "Fecha_Termino": st.column_config.DateColumn("Fin")
+                                "Fecha_Termino": st.column_config.DateColumn("Fin"),
+                                "Dias_Duracion": st.column_config.NumberColumn("Días duración (háb.)", min_value=0.5, step=0.5, format="%.1f"),
                             },
                             disabled=["Proyecto", "Trabajador", "Tarea"], hide_index=True, use_container_width=True, key=f"ed_tar_{proyecto_seg}"
                         )
@@ -1204,6 +1485,7 @@ elif st.session_state.menu_actual == "Operaciones":
                         if st.button("💾 Guardar Progreso de Tareas", type="primary"):
                             df_tareas_editadas['Fecha_Inicio'] = df_tareas_editadas['Fecha_Inicio'].astype(str)
                             df_tareas_editadas['Fecha_Termino'] = df_tareas_editadas['Fecha_Termino'].astype(str)
+                            df_tareas_editadas['Dias_Duracion'] = pd.to_numeric(df_tareas_editadas['Dias_Duracion'], errors='coerce').fillna(1.0)
                             
                             st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_reemplazo]
                             st.session_state.proyectos_tareas = pd.concat([st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True)
