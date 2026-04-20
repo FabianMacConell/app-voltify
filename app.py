@@ -460,7 +460,7 @@ def generar_pdf_liquidacion(datos):
     
     # 1. ENCABEZADO
     pdf.set_font("Arial", 'B', 10)
-git:    pdf.text(10, 15, "VOLTIFY SPA")
+    pdf.text(10, 15, "VOLTIFY SPA")
     pdf.set_font("Arial", '', 9)
     pdf.text(10, 20, "RUT : 77.871.702-6")
     pdf.text(10, 25, "JAVIERA CARRERA #1150 ARICA")
