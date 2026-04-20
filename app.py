@@ -78,8 +78,26 @@ def guardar_datos(nombre_hoja, df):
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
         hoja.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
+        return True
     except Exception as e:
         st.error(f"Error al guardar datos: {e}")
+        return False
+
+def eliminar_fila_google_sheet(nombre_hoja, row_number_1_indexed):
+    """
+    Elimina una fila (1-indexed) directamente desde Google Sheets.
+    Nota: la fila 1 normalmente es el header.
+    """
+    try:
+        if not isinstance(row_number_1_indexed, int) or row_number_1_indexed < 2:
+            raise ValueError("row_number_1_indexed inválido (debe ser >= 2).")
+        libro = conectar_google_sheets()
+        hoja = libro.worksheet(nombre_hoja)
+        hoja.delete_rows(row_number_1_indexed)
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar fila en Google Sheets: {e}")
+        return False
 
 def cargar_datos(nombre_hoja, df_default):
     try:
@@ -1243,19 +1261,108 @@ elif st.session_state.menu_actual == "Proyectos":
                 with st.container(border=True):
                     st.write("#### Gastos Desglosados")
                     if st.session_state.acceso_proyectos == "admin":
+                        # Alta rápida (forzada con key v2 para evitar estado corrupto)
+                        st.markdown("##### ➕ Añadir gasto manual")
+                        c_add1, c_add2, c_add3 = st.columns([3, 1, 1], vertical_alignment="bottom")
+                        desc_manual = c_add1.text_input(
+                            "Detalle de gasto",
+                            value="",
+                            placeholder="Ej: Compra materiales, arriendo herramienta, traslado, etc.",
+                            key=f"desc_gasto_v2_{proyecto_seleccionado}",
+                        )
+                        monto_manual = c_add2.number_input(
+                            "Monto (CLP)",
+                            min_value=0.0,
+                            step=1000.0,
+                            value=0.0,
+                            key=f"monto_gasto_v2_{proyecto_seleccionado}",
+                        )
+                        dias_manual_g = c_add3.number_input(
+                            "Días (opcional)",
+                            min_value=0.0,
+                            step=0.5,
+                            value=0.0,
+                            key=f"dias_gasto_v2_{proyecto_seleccionado}",
+                        )
+                        if st.button("Añadir gasto", type="primary", use_container_width=True, key=f"btn_add_gasto_v2_{proyecto_seleccionado}"):
+                            if str(desc_manual).strip() == "":
+                                st.error("Escribe un detalle de gasto para poder guardarlo.")
+                            else:
+                                nuevo_gasto_manual = pd.DataFrame([{
+                                    "Proyecto": proyecto_seleccionado,
+                                    "Detalle_Gasto": str(desc_manual).strip(),
+                                    "Monto": float(monto_manual),
+                                    "Dias_Asignados": float(dias_manual_g),
+                                }])
+                                st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_manual], ignore_index=True)
+                                ok = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                                if ok:
+                                    st.success("Gasto añadido correctamente en Google Sheets.")
+                                st.rerun()
+
+                        st.divider()
                         cols_g = ["Detalle_Gasto", "Monto", "Dias_Asignados"]
                         for c in cols_g:
                             if c not in df_gastos_proy.columns:
                                 df_gastos_proy[c] = 0 if c == "Dias_Asignados" else ""
+                        df_gastos_proy["Detalle_Gasto"] = df_gastos_proy["Detalle_Gasto"].astype(str)
                         df_gastos_editados = st.data_editor(
                             df_gastos_proy[cols_g],
                             column_config={
+                                "Detalle_Gasto": st.column_config.TextColumn("Detalle de gasto"),
                                 "Monto": st.column_config.NumberColumn("Monto (CLP)", min_value=0, format="%.0f"),
                                 "Dias_Asignados": st.column_config.NumberColumn("Días asignados", min_value=0.0, step=0.5, format="%.1f"),
                             },
                             num_rows="dynamic",
                             use_container_width=True,
+                            key=f"ed_gastos_v2_{proyecto_seleccionado}",
                         )
+
+                        c_gsave, c_gdel = st.columns([1, 1], vertical_alignment="bottom")
+                        with c_gsave:
+                            if st.button("💾 Guardar cambios de Gastos", type="primary", use_container_width=True, key=f"save_gastos_{proyecto_seleccionado}"):
+                                # Persistir cambios (incluye eliminaciones hechas en el editor)
+                                st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[
+                                    st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado
+                                ]
+                                df_tmp = df_gastos_editados.copy()
+                                df_tmp["Proyecto"] = proyecto_seleccionado
+                                if "Dias_Asignados" not in df_tmp.columns:
+                                    df_tmp["Dias_Asignados"] = 0
+                                df_tmp["Dias_Asignados"] = pd.to_numeric(df_tmp["Dias_Asignados"], errors="coerce").fillna(0)
+                                df_tmp["Monto"] = pd.to_numeric(df_tmp["Monto"], errors="coerce").fillna(0)
+                                st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_tmp], ignore_index=True)
+                                ok = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                                if ok:
+                                    st.success("Gastos actualizados correctamente en Google Sheets.")
+                                st.rerun()
+
+                        with c_gdel:
+                            with st.popover("🗑️ Eliminar 1 gasto"):
+                                st.caption("Eliminación inmediata en Google Sheets (evita que reaparezca al recargar).")
+                                df_full = st.session_state.proyectos_gastos.reset_index(drop=True)
+                                df_sel = df_full[df_full["Proyecto"] == proyecto_seleccionado].copy()
+                                if df_sel.empty:
+                                    st.info("No hay gastos para eliminar en este proyecto.")
+                                else:
+                                    df_sel = df_sel.reset_index(drop=False).rename(columns={"index": "_pos_full"})
+                                    opciones = []
+                                    for _, r in df_sel.iterrows():
+                                        detalle = str(r.get("Detalle_Gasto", "")).strip()
+                                        monto = float(r.get("Monto", 0) or 0)
+                                        dias_a = float(r.get("Dias_Asignados", 0) or 0)
+                                        opciones.append(f"[{int(r['_pos_full'])}] {detalle} — {formato_clp(monto)} — {dias_a:g} días")
+                                    sel = st.selectbox("Selecciona gasto", opciones, key=f"del_gasto_sel_{proyecto_seleccionado}")
+                                    confirmar = st.checkbox("Confirmo eliminación", key=f"del_gasto_ok_{proyecto_seleccionado}")
+                                    if st.button("Eliminar definitivamente", type="primary", use_container_width=True, disabled=not confirmar, key=f"del_gasto_btn_{proyecto_seleccionado}"):
+                                        pos_full = int(sel.split("]")[0].replace("[", "").strip())
+                                        # row en Google Sheets: +2 (fila 1 = header, fila 2 = primer dato)
+                                        row_sheet = pos_full + 2
+                                        ok_api = eliminar_fila_google_sheet("Proyectos_Gastos", row_sheet)
+                                        if ok_api:
+                                            st.session_state.proyectos_gastos = df_full.drop(index=pos_full).reset_index(drop=True)
+                                            st.success("Gasto eliminado correctamente en Google Sheets.")
+                                            st.rerun()
                     else:
                         cols_show = [c for c in ["Detalle_Gasto", "Monto", "Dias_Asignados"] if c in df_gastos_proy.columns]
                         if not cols_show:
@@ -1361,9 +1468,10 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         df_gastos_editados["Proyecto"] = proyecto_seleccionado
                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_gastos_editados], ignore_index=True)
-                        guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
-                        guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                        st.success("Guardado correctamente.")
+                        ok1 = guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
+                        ok2 = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                        if ok1 and ok2:
+                            st.success("Guardado correctamente en Google Sheets.")
                 with col_del:
                     if st.button("🗑️ Eliminar Proyecto Completo", use_container_width=True):
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado]
