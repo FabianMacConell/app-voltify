@@ -118,6 +118,52 @@ TASAS_AFP = {
     "Uno (10.69%)": 0.1069
 }
 
+def formato_clp(valor):
+    try: return f"${int(valor):,.0f}".replace(",", ".")
+    except (ValueError, TypeError): return "$0"
+
+def a_numerico_clp(valor, default=0.0):
+    """Convierte montos desde número, texto CLP o celdas corruptas a float."""
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return float(default)
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    s = str(valor).strip()
+    if not s or s.lower() in ("nan", "none", "format"):
+        return float(default)
+    s = s.replace(".", "").replace(",", "").replace("$", "").replace(" ", "")
+    try:
+        return float(s)
+    except ValueError:
+        return float(default)
+
+COLUMNAS_NOMINA = [
+    "RUT", "Trabajador", "Cargo", "Sueldo_Base", "Jornada_Hrs", "Tipo_Contrato",
+    "Gratificacion", "AFP", "Dias_Falta", "Horas_Atraso", "Horas_Extras",
+    "Colacion", "Movilizacion", "Anticipo",
+]
+
+def sanitizar_nomina(df):
+    """Asegura tipos numéricos en nómina (evita strings de formato en Sueldo_Base, etc.)."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    cols_numericas = {
+        "Sueldo_Base", "Jornada_Hrs", "Dias_Falta", "Horas_Atraso", "Horas_Extras",
+        "Colacion", "Movilizacion", "Anticipo",
+    }
+    for col in COLUMNAS_NOMINA:
+        if col not in out.columns:
+            out[col] = 0 if col in cols_numericas else ""
+    out = out[[c for c in COLUMNAS_NOMINA if c in out.columns]]
+    enteros = ["Sueldo_Base", "Colacion", "Movilizacion", "Anticipo", "Horas_Atraso", "Horas_Extras", "Jornada_Hrs"]
+    decimales = ["Dias_Falta"]
+    for col in enteros:
+        out[col] = out[col].apply(lambda v, c=col: int(round(a_numerico_clp(v))))
+    for col in decimales:
+        out[col] = out[col].apply(lambda v, c=col: float(a_numerico_clp(v)))
+    return out
+
 if 'nomina' not in st.session_state:
     df_nomina_base = pd.DataFrame([{
         "RUT": "11.111.111-1",
@@ -125,12 +171,13 @@ if 'nomina' not in st.session_state:
         "Sueldo_Base": 850000, "Jornada_Hrs": 44, "Tipo_Contrato": "Indefinido", "Gratificacion": "Tope Legal Mensual", "AFP": "Habitat (11.27%)",
         "Dias_Falta": 0, "Horas_Atraso": 0, "Horas_Extras": 0, "Colacion": 0, "Movilizacion": 0, "Anticipo": 0
     }])
-    st.session_state.nomina = cargar_datos("Nomina_Personal", df_nomina_base)
+    st.session_state.nomina = sanitizar_nomina(cargar_datos("Nomina_Personal", df_nomina_base))
 
 columnas_obligatorias = ["Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Anticipo"]
 for col in columnas_obligatorias:
     if col not in st.session_state.nomina.columns:
         st.session_state.nomina[col] = 0
+st.session_state.nomina = sanitizar_nomina(st.session_state.nomina)
 
 if 'RUT' not in st.session_state.nomina.columns:
     st.session_state.nomina['RUT'] = "Sin Registro"
@@ -179,9 +226,18 @@ if 'inventario' not in st.session_state:
 if 'ultima_etiqueta' not in st.session_state:
     st.session_state.ultima_etiqueta = None
 
-def formato_clp(valor):
-    try: return f"${int(valor):,.0f}".replace(",", ".")
-    except (ValueError, TypeError): return "$0"
+def df_formateado_clp(df: pd.DataFrame, columnas_monto: list[str]) -> pd.DataFrame:
+    """
+    Devuelve una copia del DF con columnas de monto formateadas como CLP ($ con miles, sin decimales),
+    sin modificar el dataframe original (útil para st.dataframe/st.table).
+    """
+    if df is None or getattr(df, "empty", True):
+        return df
+    out = df.copy()
+    for c in columnas_monto:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0).apply(formato_clp)
+    return out
 
 # --- Capacidad mensual de trabajadores (días hábiles) ---
 def dias_habiles_en_mes(year, month):
@@ -384,15 +440,14 @@ def calcular_liquidaciones(df):
     resultados = []
     costo_empresa_total = 0
     for index, row in df.iterrows():
-        try: sueldo_base = float(row.get('Sueldo_Base', 0))
-        except: sueldo_base = 0.0
+        sueldo_base = a_numerico_clp(row.get('Sueldo_Base', 0))
         try: jornada = float(row.get('Jornada_Hrs', 44))
         except: jornada = 44.0
         
-        dias_falta = float(row.get('Dias_Falta', 0))
-        horas_atraso = float(row.get('Horas_Atraso', 0))
-        horas_extras_qty = float(row.get('Horas_Extras', 0))
-        anticipo = float(row.get('Anticipo', 0))
+        dias_falta = float(a_numerico_clp(row.get('Dias_Falta', 0)))
+        horas_atraso = float(a_numerico_clp(row.get('Horas_Atraso', 0)))
+        horas_extras_qty = float(a_numerico_clp(row.get('Horas_Extras', 0)))
+        anticipo = float(a_numerico_clp(row.get('Anticipo', 0)))
         
         valor_dia = sueldo_base / 30 if sueldo_base > 0 else 0
         valor_hora_normal = (sueldo_base / 30) * 28 / jornada if jornada > 0 else 0
@@ -416,8 +471,8 @@ def calcular_liquidaciones(df):
         tipo_contrato = str(row.get('Tipo_Contrato', 'Indefinido'))
         dcto_cesantia = sueldo_imponible * 0.006 if tipo_contrato == "Indefinido" else 0.0
         
-        colacion = float(row.get('Colacion', 0))
-        movilizacion = float(row.get('Movilizacion', 0))
+        colacion = float(a_numerico_clp(row.get('Colacion', 0)))
+        movilizacion = float(a_numerico_clp(row.get('Movilizacion', 0)))
         no_imponibles = colacion + movilizacion
         
         total_prevision = dcto_afp + dcto_fonasa + dcto_cesantia
@@ -432,7 +487,9 @@ def calcular_liquidaciones(df):
         resultados.append({
             "RUT": str(row.get('RUT', 'Sin Registro')),
             "Trabajador": row['Trabajador'], "Cargo": row['Cargo'], "Contrato": tipo_contrato,
-            "Sueldo Base": sueldo_base, "Sueldo Proporcional": sueldo_base - dcto_faltas - dcto_atrasos,
+            "Sueldo Base": sueldo_base,
+            "Sueldo Base Diario": valor_dia,
+            "Sueldo Proporcional": sueldo_base - dcto_faltas - dcto_atrasos,
             "Horas Extras Monto": pago_extras, "Horas Extras Qty": horas_extras_qty,
             "Gratificacion": grati_monto,
             "Colacion": colacion, "Movilizacion": movilizacion, 
@@ -545,8 +602,10 @@ def generar_pdf_liquidacion(datos):
 
     # --- COLUMNA IZQUIERDA ---
     y_l = y_start_cols
-    dias_trabajados = 30 - int(datos.get("Dias_Falta", 0))
-    pdf.text(10, y_l, f"Días Trabajados: {dias_trabajados},00")
+    dias_falta_pdf = float(datos.get("Dias_Falta", 0) or 0)
+    dias_trabajados = 30.0 - dias_falta_pdf
+    dias_trabajados_str = f"{dias_trabajados:.1f}".replace(".", ",")
+    pdf.text(10, y_l, f"Días Trabajados: {dias_trabajados_str}")
     
     y_l += 6
     pdf.text(10, y_l, "Sueldo:")
@@ -636,7 +695,8 @@ def generar_pdf_liquidacion(datos):
     y_r += 4
     pdf.text(165, y_r, "Faltas:")
     if datos["Dias_Falta"] > 0:
-        pdf.text(180, y_r, f"{int(datos['Dias_Falta'])} dia")
+        dias_falta_str = f"{float(datos['Dias_Falta']):.1f}".replace(".", ",")
+        pdf.text(180, y_r, f"{dias_falta_str} día(s)")
         
     y_r += 8
     pdf.text(130, y_r, "Base Tributable:")
@@ -928,25 +988,25 @@ elif st.session_state.menu_actual == "Finanzas":
 
                     st.caption("Modifique las variables del mes directamente en la tabla (Anticipo y Faltas están junto al Sueldo):")
                     df_nomina_edit = st.data_editor(
-                        st.session_state.nomina,
+                        sanitizar_nomina(st.session_state.nomina),
                         column_config={
                             "RUT": None, 
-                            "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, format="%,d"),
-                            "Colacion": st.column_config.NumberColumn("Colación", min_value=0, format="%,d"),
-                            "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, format="%,d"),
+                            "Sueldo_Base": st.column_config.NumberColumn("Sueldo Base", min_value=0, step=1000, format="%d"),
+                            "Colacion": st.column_config.NumberColumn("Colación", min_value=0, step=1000, format="%d"),
+                            "Movilizacion": st.column_config.NumberColumn("Movilización", min_value=0, step=1000, format="%d"),
                             "Tipo_Contrato": st.column_config.SelectboxColumn("Contrato", options=["Indefinido", "Plazo Fijo"]),
                             "Gratificacion": st.column_config.SelectboxColumn("Gratificación", options=["Tope Legal Mensual", "25% del Sueldo (Sin Tope)", "Sin Gratificación"]),
                             "AFP": st.column_config.SelectboxColumn("AFP", options=list(TASAS_AFP.keys())),
-                            "Dias_Falta": st.column_config.NumberColumn("Días Falta", min_value=0),
+                            "Dias_Falta": st.column_config.NumberColumn("Días Falta", min_value=0.0, step=0.5, format="%.1f"),
                             "Horas_Atraso": st.column_config.NumberColumn("Hrs Atraso", min_value=0),
                             "Horas_Extras": st.column_config.NumberColumn("Hrs Extras", min_value=0),
-                            "Anticipo": st.column_config.NumberColumn("Anticipo ($)", min_value=0, format="%,d"),
+                            "Anticipo": st.column_config.NumberColumn("Anticipo ($)", min_value=0, step=1000, format="%d"),
                         },
                         column_order=["Trabajador", "Cargo", "Sueldo_Base", "Anticipo", "Dias_Falta", "Horas_Atraso", "Horas_Extras", "Colacion", "Movilizacion", "Jornada_Hrs", "Gratificacion", "AFP", "Tipo_Contrato"],
                         num_rows="dynamic", use_container_width=True, key="ed_nomina"
                     )
                     if st.button("💾 Guardar Cambios de Nómina / Mes", type="primary"):
-                        st.session_state.nomina = df_nomina_edit
+                        st.session_state.nomina = sanitizar_nomina(df_nomina_edit)
                         guardar_datos("Nomina_Personal", st.session_state.nomina)
                         st.success("Nómina actualizada.")
                         
@@ -960,15 +1020,25 @@ elif st.session_state.menu_actual == "Finanzas":
                                 st.success(f"Trabajador {trab_a_borrar} dado de baja exitosamente.")
                                 st.rerun()
                 else:
-                    st.dataframe(st.session_state.nomina.drop(columns=["RUT"], errors='ignore'), use_container_width=True)
+                    df_nom_vis = st.session_state.nomina.drop(columns=["RUT"], errors="ignore").copy()
+                    df_nom_vis = df_formateado_clp(df_nom_vis, ["Sueldo_Base", "Colacion", "Movilizacion", "Anticipo"])
+                    st.dataframe(df_nom_vis, use_container_width=True)
 
             with st.container(border=True):
                 st.subheader("Proyección de Liquidaciones")
                 df_liquidaciones, total_nomina_empresa = calcular_liquidaciones(st.session_state.nomina)
                 
-                df_liq_visual = df_liquidaciones[["Trabajador", "Cargo", "Imponible Calculado", "Total Prevision", "Anticipo", "Total a Pagar", "Costo Empresa"]].copy()
-                for col in ["Imponible Calculado", "Total Prevision", "Anticipo", "Total a Pagar", "Costo Empresa"]:
-                    df_liq_visual[col] = df_liq_visual[col].apply(formato_clp)
+                cols_liq = [
+                    "Trabajador", "Cargo", "Sueldo Base", "Sueldo Base Diario",
+                    "Imponible Calculado", "Total Prevision", "Anticipo", "Total a Pagar", "Costo Empresa",
+                ]
+                df_liq_visual = df_liquidaciones[[c for c in cols_liq if c in df_liquidaciones.columns]].copy()
+                for col in [
+                    "Sueldo Base", "Sueldo Base Diario", "Imponible Calculado",
+                    "Total Prevision", "Anticipo", "Total a Pagar", "Costo Empresa",
+                ]:
+                    if col in df_liq_visual.columns:
+                        df_liq_visual[col] = df_liq_visual[col].apply(formato_clp)
                     
                 st.dataframe(df_liq_visual, use_container_width=True)
                 st.info(f"**Costo Total Proyectado de Nómina:** {formato_clp(total_nomina_empresa)}")
@@ -994,13 +1064,24 @@ elif st.session_state.menu_actual == "Finanzas":
             with st.container(border=True):
                 st.subheader("Gastos Fijos Operativos")
                 if st.session_state.acceso_finanzas == "admin":
-                    res_fijos = st.data_editor(st.session_state.gastos_fijos, num_rows="dynamic", use_container_width=True)
+                    res_fijos = st.data_editor(
+                        st.session_state.gastos_fijos,
+                        column_config={
+                            "Descripción": st.column_config.TextColumn("Descripción"),
+                            "Monto (CLP)": st.column_config.NumberColumn("Monto (CLP)", min_value=0, step=1000, format="%d"),
+                        },
+                        num_rows="dynamic",
+                        use_container_width=True,
+                    )
                     if st.button("💾 Guardar Cambios Fijos", type="primary"):
                         st.session_state.gastos_fijos = res_fijos
                         guardar_datos("Gastos_Fijos", res_fijos)
                         st.success("Gastos fijos actualizados.")
                 else:
-                    st.dataframe(st.session_state.gastos_fijos, use_container_width=True)
+                    st.dataframe(
+                        df_formateado_clp(st.session_state.gastos_fijos, ["Monto (CLP)"]),
+                        use_container_width=True,
+                    )
 
         with tab_facturas:
             with st.container(border=True):
@@ -1147,7 +1228,7 @@ elif st.session_state.menu_actual == "Presupuestos":
             df_pres_edit = st.data_editor(
                 st.session_state.presupuestos,
                 column_config={
-                    "Monto": st.column_config.NumberColumn("Monto Total", format="%,d"),
+                    "Monto": st.column_config.NumberColumn("Monto Total", min_value=0, step=1000, format="%d"),
                     "Aprobacion": st.column_config.SelectboxColumn("Aprobación", options=opciones_aprobacion),
                     "Orden_Compra": st.column_config.SelectboxColumn("Orden", options=opciones_orden),
                     "Num_OC": st.column_config.TextColumn("N° O.C."),
@@ -1270,18 +1351,22 @@ elif st.session_state.menu_actual == "Proyectos":
                             placeholder="Ej: Compra materiales, arriendo herramienta, traslado, etc.",
                             key=f"desc_gasto_v2_{proyecto_seleccionado}",
                         )
-                        monto_manual = c_add2.number_input(
-                            "Monto (CLP)",
-                            min_value=0.0,
-                            step=1000.0,
-                            value=0.0,
-                            key=f"monto_gasto_v2_{proyecto_seleccionado}",
-                        )
+                        with c_add2:
+                            monto_manual = st.number_input(
+                                "Monto (CLP)",
+                                min_value=0,
+                                step=1000,
+                                value=0,
+                                format="%d",
+                                key=f"monto_gasto_v2_{proyecto_seleccionado}",
+                            )
+                            st.caption(formato_clp(int(monto_manual)))
                         dias_manual_g = c_add3.number_input(
                             "Días (opcional)",
                             min_value=0.0,
                             step=0.5,
                             value=0.0,
+                            format="%.2f",
                             key=f"dias_gasto_v2_{proyecto_seleccionado}",
                         )
                         if st.button("Añadir gasto", type="primary", use_container_width=True, key=f"btn_add_gasto_v2_{proyecto_seleccionado}"):
@@ -1291,7 +1376,7 @@ elif st.session_state.menu_actual == "Proyectos":
                                 nuevo_gasto_manual = pd.DataFrame([{
                                     "Proyecto": proyecto_seleccionado,
                                     "Detalle_Gasto": str(desc_manual).strip(),
-                                    "Monto": float(monto_manual),
+                                    "Monto": int(monto_manual),
                                     "Dias_Asignados": float(dias_manual_g),
                                 }])
                                 st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_manual], ignore_index=True)
@@ -1310,7 +1395,7 @@ elif st.session_state.menu_actual == "Proyectos":
                             df_gastos_proy[cols_g],
                             column_config={
                                 "Detalle_Gasto": st.column_config.TextColumn("Detalle de gasto"),
-                                "Monto": st.column_config.NumberColumn("Monto (CLP)", min_value=0, format="%.0f"),
+                                "Monto": st.column_config.NumberColumn("Monto (CLP)", min_value=0, step=1000, format="%d"),
                                 "Dias_Asignados": st.column_config.NumberColumn("Días asignados", min_value=0.0, step=0.5, format="%.1f"),
                             },
                             num_rows="dynamic",
@@ -1367,8 +1452,9 @@ elif st.session_state.menu_actual == "Proyectos":
                         cols_show = [c for c in ["Detalle_Gasto", "Monto", "Dias_Asignados"] if c in df_gastos_proy.columns]
                         if not cols_show:
                             cols_show = ["Detalle_Gasto", "Monto"]
-                        df_gastos_editados = df_gastos_proy[cols_show]
-                        st.dataframe(df_gastos_editados, use_container_width=True)
+                        df_gastos_editados = df_gastos_proy[cols_show].copy()
+                        df_gastos_vis = df_formateado_clp(df_gastos_editados, ["Monto"])
+                        st.dataframe(df_gastos_vis, use_container_width=True)
 
             if st.session_state.acceso_proyectos == "admin":
                 with st.container(border=True):
@@ -1786,12 +1872,12 @@ elif st.session_state.menu_actual == "Inventario":
         with st.expander("➕ Añadir Nuevo Artículo al Inventario", expanded=False):
             colI1, colI2 = st.columns([3, 1])
             nuevo_art = colI1.text_input("Nombre del Artículo / Herramienta:")
-            nueva_cant = colI2.number_input("Cantidad:", min_value=1, step=1)
+            nueva_cant = colI2.number_input("Cantidad:", min_value=1, step=1, value=1, format="%d")
             if st.button("Guardar en Inventario", type="primary"):
                 if nuevo_art:
                     nuevo_serie = f"VLT-{uuid.uuid4().hex[:6].upper()}"
                     # FASE 1: Semáforos visuales en Inventario
-                    nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": nueva_cant, "Nro_Serie": nuevo_serie, "Estado": "🟢 Disponible"}])
+                    nuevo_item = pd.DataFrame([{"Artículo": nuevo_art, "Cantidad": int(nueva_cant), "Nro_Serie": nuevo_serie, "Estado": "🟢 Disponible"}])
                     st.session_state.inventario = pd.concat([st.session_state.inventario, nuevo_item], ignore_index=True)
                     guardar_datos("Inventario", st.session_state.inventario)
                     st.success(f"✅ Artículo añadido con éxito. **N° de Serie: {nuevo_serie}**")
@@ -1823,7 +1909,7 @@ elif st.session_state.menu_actual == "Inventario":
             df_inv_edit = st.data_editor(
                 st.session_state.inventario,
                 column_config={
-                    "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0),
+                    "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, step=1, format="%.0f"),
                     # FASE 1: Semáforos visuales en Inventario
                     "Estado": st.column_config.SelectboxColumn("Estado", options=["🟢 Disponible", "🟡 En Uso", "🛠️ En Reparación", "❌ Extraviado", "Disponible", "En Uso", "En Reparación", "Extraviado"]),
                     "Nro_Serie": st.column_config.TextColumn("N° de Serie (Automático)")
@@ -1831,7 +1917,15 @@ elif st.session_state.menu_actual == "Inventario":
                 disabled=["Artículo", "Nro_Serie"], hide_index=True, use_container_width=True, key="ed_inv"
             )
             if st.button("💾 Guardar Cambios de Inventario", type="primary"):
-                st.session_state.inventario = df_inv_edit
+                df_inv_guardar = df_inv_edit.copy()
+                if "Cantidad" in df_inv_guardar.columns:
+                    df_inv_guardar["Cantidad"] = (
+                        pd.to_numeric(df_inv_guardar["Cantidad"], errors="coerce")
+                        .fillna(0)
+                        .round(0)
+                        .astype(int)
+                    )
+                st.session_state.inventario = df_inv_guardar
                 guardar_datos("Inventario", st.session_state.inventario)
                 st.success("Inventario actualizado correctamente.")
             with st.expander("🗑️ Dar de Baja / Eliminar Artículo"):
