@@ -74,7 +74,28 @@ def obtener_o_crear_hoja(libro, nombre_hoja, columnas):
         hoja.append_row(columnas)
         return hoja
 
-def guardar_datos(nombre_hoja, df):
+def limpiar_cache_streamlit():
+    if hasattr(st, "cache_data"):
+        st.cache_data.clear()
+
+def mostrar_mensaje_guardado_flash():
+    """Muestra el mensaje de éxito guardado antes del rerun automático."""
+    msg = st.session_state.pop("_flash_guardado_ok", None)
+    if msg:
+        st.success(msg)
+        if hasattr(st, "toast"):
+            st.toast(msg, icon="✅")
+
+def refrescar_app_tras_guardado(ok, mensaje=None):
+    """Limpia caché y rerun interno para reflejar datos sin F5 manual."""
+    if not ok:
+        return False
+    limpiar_cache_streamlit()
+    if mensaje:
+        st.session_state["_flash_guardado_ok"] = mensaje
+    st.rerun()
+
+def guardar_datos(nombre_hoja, df, refrescar_ui=False, mensaje_flash=None):
     try:
         libro = conectar_google_sheets()
         df_clean = df.fillna(0)
@@ -91,6 +112,8 @@ def guardar_datos(nombre_hoja, df):
         hoja = obtener_o_crear_hoja(libro, nombre_hoja, df_clean.columns.tolist())
         hoja.clear()
         hoja.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
+        if refrescar_ui:
+            refrescar_app_tras_guardado(True, mensaje_flash)
         return True
     except Exception as e:
         st.error(f"Error al guardar datos: {e}")
@@ -102,11 +125,17 @@ def guardar_datos_diferido(nombre_hoja, df):
         st.session_state._gs_pending = {}
     st.session_state._gs_pending[nombre_hoja] = df.copy()
 
-def flush_guardados_diferidos():
+def flush_guardados_diferidos(refrescar_ui=False, mensaje_flash=None):
     """Escribe en Sheets todo lo encolado en esta ejecución."""
     pending = st.session_state.pop("_gs_pending", None) or {}
+    if not pending:
+        return True
+    ok = True
     for nombre_hoja, df in pending.items():
-        guardar_datos(nombre_hoja, df)
+        ok = guardar_datos(nombre_hoja, df) and ok
+    if ok and refrescar_ui:
+        refrescar_app_tras_guardado(True, mensaje_flash)
+    return ok
 
 def eliminar_fila_google_sheet(nombre_hoja, row_number_1_indexed):
     """
@@ -391,18 +420,15 @@ def opciones_material_bodega(df_stock):
         mapa[label] = cod
     return opts, mapa
 
-def limpiar_cache_streamlit():
-    if hasattr(st, "cache_data"):
-        st.cache_data.clear()
-
-def guardar_operaciones_tareas():
-    """Persiste el tablero en Operaciones_Tareas y refresca caché de Streamlit."""
+def guardar_operaciones_tareas(mensaje_flash=None):
+    """Persiste el tablero en Operaciones_Tareas y refresca la UI al instante."""
     st.session_state.operaciones_tareas = sanitizar_operaciones_tareas(st.session_state.operaciones_tareas)
     st.session_state.operaciones_tareas = _migrar_dias_duracion_tareas(st.session_state.operaciones_tareas)
-    ok = guardar_datos("Operaciones_Tareas", st.session_state.operaciones_tareas)
-    limpiar_cache_streamlit()
-    st.session_state.ops_tareas_rev = int(st.session_state.get("ops_tareas_rev", 0)) + 1
-    st.session_state.pop(f"ed_ops_tareas_{st.session_state.ops_tareas_rev - 1}", None)
+    ok = guardar_datos("Operaciones_Tareas", st.session_state.operaciones_tareas, refrescar_ui=False)
+    if ok:
+        st.session_state.ops_tareas_rev = int(st.session_state.get("ops_tareas_rev", 0)) + 1
+        st.session_state.pop(f"ed_ops_tareas_{st.session_state.ops_tareas_rev - 1}", None)
+        refrescar_app_tras_guardado(True, mensaje_flash or "Cambios guardados en Operaciones_Tareas.")
     return ok
 
 def recargar_bodega_stock_desde_sheets():
@@ -478,17 +504,21 @@ def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, dest
     if not guardar_datos("Bodega_Historial", st.session_state.bodega_historial):
         return False, "Stock actualizado, pero falló el guardado del historial.", nuevo_stock
 
-    refrescar_widgets_bodega_tras_movimiento()
+    msg_ok = f"{tipo_mov} registrada. Stock actualizado: {nuevo_stock} un."
+    refrescar_widgets_bodega_tras_movimiento(mensaje_flash=msg_ok, rerun=True)
 
-    return True, f"{tipo_mov} registrada. Stock actualizado: {nuevo_stock} un.", nuevo_stock
+    return True, msg_ok, nuevo_stock
 
-def refrescar_widgets_bodega_tras_movimiento():
-    """Sincroniza UI tras cambio de stock: caché, revisión de widgets y data_editor."""
-    limpiar_cache_streamlit()
+def refrescar_widgets_bodega_tras_movimiento(mensaje_flash=None, rerun=True):
+    """Sincroniza UI tras cambio de stock: caché, widgets y rerun opcional."""
     rev_anterior = int(st.session_state.get("bod_stock_rev", 0))
     st.session_state.bod_stock_rev = rev_anterior + 1
     st.session_state.pop(f"ed_bodega_stock_{rev_anterior}", None)
     st.session_state.pop("ed_bodega_stock", None)
+    if rerun:
+        refrescar_app_tras_guardado(True, mensaje_flash)
+    else:
+        limpiar_cache_streamlit()
 
 st.session_state.bodega_stock = sanitizar_bodega_stock(st.session_state.bodega_stock)
 st.session_state.bodega_historial = sanitizar_bodega_historial(st.session_state.bodega_historial)
@@ -759,8 +789,7 @@ def render_panel_capacidad_trabajadores(df_tareas, lista_trabajadores, key_suffi
 def _wos_cambiar_estado_tarea(idx, nuevo_estado, mensaje="Estado actualizado"):
     st.session_state.operaciones_tareas.at[idx, "Estado"] = normalizar_estado_tarea(nuevo_estado)
     guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
-    if hasattr(st, "toast"):
-        st.toast(mensaje, icon="✅")
+    flush_guardados_diferidos(refrescar_ui=True, mensaje_flash=mensaje)
 
 def _render_wos_tablero(proyecto_seg):
     """Tablero Kanban / lista (dentro del fragmento Work OS)."""
@@ -807,14 +836,12 @@ def _render_wos_tablero(proyecto_seg):
                     [st.session_state.operaciones_tareas, nueva_tarea], ignore_index=True
                 )
                 guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
-                if hasattr(st, "toast"):
-                    st.toast("Tarea asignada.", icon="✅")
+                flush_guardados_diferidos(refrescar_ui=True, mensaje_flash="Tarea asignada al proyecto.")
             else:
                 st.error("Escribe una descripción para la tarea.")
 
     if tareas_proy.empty:
         st.info("No hay tareas registradas para este proyecto en el tablero.")
-        flush_guardados_diferidos()
         return
 
     col_filt1, col_filt2 = st.columns([1, 2])
@@ -909,8 +936,7 @@ def _render_wos_tablero(proyecto_seg):
                 [st.session_state.operaciones_tareas, df_tareas_editadas], ignore_index=True
             )
             guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
-            if hasattr(st, "toast"):
-                st.toast("Estados actualizados.", icon="✅")
+            flush_guardados_diferidos(refrescar_ui=True, mensaje_flash="Progreso de tareas actualizado.")
 
     st.write("")
     with st.expander("🗑️ Zona de Peligro: Eliminar Tareas"):
@@ -927,10 +953,7 @@ def _render_wos_tablero(proyecto_seg):
                 )
                 st.session_state.operaciones_tareas = st.session_state.operaciones_tareas[~mask_eliminar]
                 guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
-                if hasattr(st, "toast"):
-                    st.toast("Tarea eliminada.", icon="🗑️")
-
-    flush_guardados_diferidos()
+                flush_guardados_diferidos(refrescar_ui=True, mensaje_flash="Tarea eliminada del proyecto.")
 
 def _render_wos_equipo(proyecto_seg):
     """Roles del equipo (dentro del fragmento Work OS)."""
@@ -986,10 +1009,7 @@ def _render_wos_equipo(proyecto_seg):
         st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[~mask_eq]
         st.session_state.proyectos_equipo = pd.concat([st.session_state.proyectos_equipo, df_eq_mod], ignore_index=True)
         guardar_datos_diferido("Proyectos_Equipo", st.session_state.proyectos_equipo)
-        if hasattr(st, "toast"):
-            st.toast("Roles del equipo actualizados.", icon="✅")
-
-    flush_guardados_diferidos()
+        flush_guardados_diferidos(refrescar_ui=True, mensaje_flash="Roles del equipo actualizados.")
 
 @_st_fragment
 def _fragment_wos_workspace(proyecto_seg, idx_p_seg):
@@ -1077,10 +1097,7 @@ def _fragment_wos_workspace(proyecto_seg, idx_p_seg):
             st.session_state.proyectos_resumen.at[idx_p_seg, "Fecha_Termino_Proy"] = str_fin
             st.session_state.proyectos_resumen.at[idx_p_seg, "Duracion_Proy"] = nueva_dur if nueva_dur else "Pendiente"
             guardar_datos_diferido("Proyectos_Resumen", st.session_state.proyectos_resumen)
-            if hasattr(st, "toast"):
-                st.toast("Configuración actualizada.", icon="✅")
-
-    flush_guardados_diferidos()
+            flush_guardados_diferidos(refrescar_ui=True, mensaje_flash="Fechas del proyecto actualizadas.")
 
 def preparar_datos_gantt(df_tareas):
     """DataFrame listo para px.timeline (Start, Finish, etiquetas)."""
@@ -1210,10 +1227,7 @@ def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
                     [sanitizar_operaciones_tareas(st.session_state.operaciones_tareas), nueva],
                     ignore_index=True,
                 )
-                if guardar_operaciones_tareas():
-                    if hasattr(st, "toast"):
-                        st.toast("Tarea creada y guardada.", icon="✅")
-                    st.success("Tarea registrada en Operaciones_Tareas.")
+                guardar_operaciones_tareas(mensaje_flash="Tarea registrada en Operaciones_Tareas.")
 
     with st.container(border=True):
         st.markdown("#### 📋 Tablero de tareas")
@@ -1253,10 +1267,7 @@ def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
                     actualizada["Estado"] = normalizar_estado_tarea(actualizada["Estado"])
                     actualizada["Prioridad"] = normalizar_prioridad_tarea(actualizada["Prioridad"])
                     st.session_state.operaciones_tareas.loc[idx] = actualizada
-                if guardar_operaciones_tareas():
-                    if hasattr(st, "toast"):
-                        st.toast("Tablero sincronizado con Google Sheets.", icon="✅")
-                    st.success("Cambios guardados en Operaciones_Tareas.")
+                guardar_operaciones_tareas(mensaje_flash="Tablero sincronizado con Operaciones_Tareas.")
 
             with st.expander("🗑️ Eliminar tarea"):
                 opciones_del = [
@@ -1268,8 +1279,7 @@ def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
                     if st.button("Eliminar tarea seleccionada", type="primary", key="ops_btn_del"):
                         idx_real = df_fil.index[opciones_del.index(sel_del)]
                         st.session_state.operaciones_tareas = st.session_state.operaciones_tareas.drop(index=idx_real)
-                        if guardar_operaciones_tareas():
-                            st.success("Tarea eliminada.")
+                        guardar_operaciones_tareas(mensaje_flash="Tarea eliminada.")
 
 @_st_fragment
 def _fragment_ops_gantt_cronograma(df_base, lista_proy, lista_trab):
@@ -1478,28 +1488,16 @@ def _fragment_modulo_bodega():
                             if stock_chk is not None and cant_int > stock_chk:
                                 st.error(f"Cantidad insuficiente en bodega. Stock actual: {stock_chk}")
                             else:
-                                ok, msg, stock_res = registrar_movimiento_bodega(
+                                ok, msg, _stock_res = registrar_movimiento_bodega(
                                     codigo_mov, cant_int, tipo_mov, fecha_mov, persona_mov, destino_final
                                 )
-                                if ok:
-                                    if hasattr(st, "toast"):
-                                        st.toast(msg, icon="✅")
-                                    st.success(f"{msg} (código {codigo_mov})")
-                                    if stock_res is not None:
-                                        st.metric("Stock actualizado", f"{int(stock_res)} un.")
-                                else:
+                                if not ok:
                                     st.error(msg)
                         else:
-                            ok, msg, stock_res = registrar_movimiento_bodega(
+                            ok, msg, _stock_res = registrar_movimiento_bodega(
                                 codigo_mov, cant_int, tipo_mov, fecha_mov, persona_mov, destino_final
                             )
-                            if ok:
-                                if hasattr(st, "toast"):
-                                    st.toast(msg, icon="✅")
-                                st.success(f"{msg} (código {codigo_mov})")
-                                if stock_res is not None:
-                                    st.metric("Stock actualizado", f"{int(stock_res)} un.")
-                            else:
+                            if not ok:
                                 st.error(msg)
 
         with st.container(border=True):
@@ -1566,10 +1564,10 @@ def _fragment_modulo_bodega():
                                 "Unidad": "un",
                             }])
                             st.session_state.bodega_stock = pd.concat([stock_df, fila_nueva], ignore_index=True)
-                            guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
-                            refrescar_widgets_bodega_tras_movimiento()
-                            st.success(f"Material **{codigo_nuevo}** añadido al inventario de materiales.")
-                            st.rerun()
+                            if guardar_datos("Bodega_Stock", st.session_state.bodega_stock, refrescar_ui=False):
+                                refrescar_widgets_bodega_tras_movimiento(
+                                    mensaje_flash=f"Material **{codigo_nuevo}** añadido al inventario."
+                                )
 
         with st.container(border=True):
             st.markdown("#### Inventario de materiales")
@@ -1595,9 +1593,12 @@ def _fragment_modulo_bodega():
                 st.caption("El **stock actual** se actualiza automáticamente al registrar entradas o salidas.")
                 if st.button("💾 Guardar inventario de materiales", type="primary", key="bod_save_stock"):
                     st.session_state.bodega_stock = sanitizar_bodega_stock(df_stock_edit)
-                    guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
-                    limpiar_cache_streamlit()
-                    st.success("Inventario de materiales actualizado en Google Sheets (Bodega_Stock).")
+                    guardar_datos(
+                        "Bodega_Stock",
+                        st.session_state.bodega_stock,
+                        refrescar_ui=True,
+                        mensaje_flash="Inventario actualizado en Bodega_Stock.",
+                    )
                 with st.expander("🗑️ Eliminar material del inventario"):
                     opts_del = [f"{int(r['Codigo'])} — {r['Nombre_Material']}" for _, r in df_stock_edit.iterrows()]
                     if opts_del:
@@ -1607,10 +1608,10 @@ def _fragment_modulo_bodega():
                             st.session_state.bodega_stock = sanitizar_bodega_stock(
                                 st.session_state.bodega_stock[st.session_state.bodega_stock["Codigo"] != cod_del]
                             )
-                            guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
-                            refrescar_widgets_bodega_tras_movimiento()
-                            st.success("Material eliminado del inventario de materiales.")
-                            st.rerun()
+                            if guardar_datos("Bodega_Stock", st.session_state.bodega_stock, refrescar_ui=False):
+                                refrescar_widgets_bodega_tras_movimiento(
+                                    mensaje_flash="Material eliminado del inventario."
+                                )
 
 
 def _migrar_dias_duracion_tareas(df):
@@ -2039,6 +2040,7 @@ if b5.button("🏭 Bodega", type="primary" if st.session_state.menu_actual == "B
 if b6.button("📊 Balance", type="primary" if st.session_state.menu_actual == "Balance" else "secondary", use_container_width=True): st.session_state.menu_actual = "Balance"; st.rerun()
 
 st.divider()
+mostrar_mensaje_guardado_flash()
 
 # ==========================================
 # PANTALLA 0: HOME DASHBOARD
@@ -2190,10 +2192,13 @@ elif st.session_state.menu_actual == "Finanzas":
                                         "Colacion": n_cola, "Movilizacion": n_movi, "Anticipo": 0
                                     }])
                                     st.session_state.nomina = pd.concat([st.session_state.nomina, nuevo_perfil], ignore_index=True)
-                                    guardar_datos("Nomina_Personal", st.session_state.nomina)
+                                    guardar_datos(
+                                        "Nomina_Personal",
+                                        st.session_state.nomina,
+                                        refrescar_ui=True,
+                                        mensaje_flash="Trabajador registrado exitosamente.",
+                                    )
                                     limpiar_form_nomina()
-                                    st.success("Trabajador registrado exitosamente.")
-                                    st.rerun()
                                 else:
                                     st.error("⚠️ El RUT y el Nombre Completo son obligatorios.")
                         with col_btn2:
@@ -2222,8 +2227,12 @@ elif st.session_state.menu_actual == "Finanzas":
                     )
                     if st.button("💾 Guardar Cambios de Nómina / Mes", type="primary"):
                         st.session_state.nomina = sanitizar_nomina(df_nomina_edit)
-                        guardar_datos("Nomina_Personal", st.session_state.nomina)
-                        st.success("Nómina actualizada.")
+                        guardar_datos(
+                            "Nomina_Personal",
+                            st.session_state.nomina,
+                            refrescar_ui=True,
+                            mensaje_flash="Nómina y asistencia actualizadas.",
+                        )
                         
                     with st.expander("🗑️ Dar de Baja / Eliminar Trabajador"):
                         lista_trabajadores = st.session_state.nomina['Trabajador'].tolist()
@@ -2231,9 +2240,12 @@ elif st.session_state.menu_actual == "Finanzas":
                             trab_a_borrar = st.selectbox("Selecciona el trabajador a eliminar:", lista_trabajadores)
                             if st.button("Eliminar Definitivamente", type="primary"):
                                 st.session_state.nomina = st.session_state.nomina[st.session_state.nomina['Trabajador'] != trab_a_borrar].reset_index(drop=True)
-                                guardar_datos("Nomina_Personal", st.session_state.nomina)
-                                st.success(f"Trabajador {trab_a_borrar} dado de baja exitosamente.")
-                                st.rerun()
+                                guardar_datos(
+                                    "Nomina_Personal",
+                                    st.session_state.nomina,
+                                    refrescar_ui=True,
+                                    mensaje_flash=f"Trabajador {trab_a_borrar} dado de baja.",
+                                )
                 else:
                     df_nom_vis = st.session_state.nomina.drop(columns=["RUT"], errors="ignore").copy()
                     df_nom_vis = df_formateado_clp(df_nom_vis, ["Sueldo_Base", "Colacion", "Movilizacion", "Anticipo"])
@@ -2290,8 +2302,12 @@ elif st.session_state.menu_actual == "Finanzas":
                     )
                     if st.button("💾 Guardar Cambios Fijos", type="primary"):
                         st.session_state.gastos_fijos = res_fijos
-                        guardar_datos("Gastos_Fijos", res_fijos)
-                        st.success("Gastos fijos actualizados.")
+                        guardar_datos(
+                            "Gastos_Fijos",
+                            res_fijos,
+                            refrescar_ui=True,
+                            mensaje_flash="Gastos fijos actualizados.",
+                        )
                 else:
                     st.dataframe(
                         df_formateado_clp(st.session_state.gastos_fijos, ["Monto (CLP)"]),
@@ -2424,10 +2440,13 @@ elif st.session_state.menu_actual == "Presupuestos":
                         "Num_OC": num_oc_pres, "Estado_Comercial": "📝 Presupuestada", "Fecha_Emision": str_fecha
                     }])
                     st.session_state.presupuestos = pd.concat([st.session_state.presupuestos, nuevo_presupuesto], ignore_index=True)
-                    guardar_datos("Presupuestos", st.session_state.presupuestos)
+                    guardar_datos(
+                        "Presupuestos",
+                        st.session_state.presupuestos,
+                        refrescar_ui=True,
+                        mensaje_flash="Presupuesto ingresado exitosamente.",
+                    )
                     st.session_state['input_monto_presupuesto'] = "0"
-                    st.success("Presupuesto ingresado exitosamente.")
-                    st.rerun()
                 else:
                     st.error("Por favor, completa la referencia, el cliente y asegúrate de que el monto sea mayor a 0.")
 
@@ -2455,8 +2474,12 @@ elif st.session_state.menu_actual == "Presupuestos":
             
             if st.button("💾 Guardar Estados Comerciales", type="primary"):
                 st.session_state.presupuestos = df_pres_edit
-                guardar_datos("Presupuestos", st.session_state.presupuestos)
-                st.success("Estados actualizados.")
+                guardar_datos(
+                    "Presupuestos",
+                    st.session_state.presupuestos,
+                    refrescar_ui=True,
+                    mensaje_flash="Estados de presupuestos actualizados.",
+                )
                 
             with st.expander("🗑️ Eliminar un Presupuesto"):
                 lista_borrar_pres = [f"[{row['Estado_Comercial']}] {row['Referencia']} - {row['Cliente']} ({formato_clp(row['Monto'])})" for i, row in st.session_state.presupuestos.iterrows()]
@@ -2465,9 +2488,12 @@ elif st.session_state.menu_actual == "Presupuestos":
                     if st.button("Eliminar Presupuesto Definitivamente"):
                         idx_borrar = lista_borrar_pres.index(pres_a_borrar)
                         st.session_state.presupuestos = st.session_state.presupuestos.drop(st.session_state.presupuestos.index[idx_borrar]).reset_index(drop=True)
-                        guardar_datos("Presupuestos", st.session_state.presupuestos)
-                        st.success("Cotización eliminada correctamente.")
-                        st.rerun()
+                        guardar_datos(
+                            "Presupuestos",
+                            st.session_state.presupuestos,
+                            refrescar_ui=True,
+                            mensaje_flash="Cotización eliminada correctamente.",
+                        )
 
 # ==========================================
 # PANTALLA 3: PROYECTOS
@@ -2508,10 +2534,10 @@ elif st.session_state.menu_actual == "Proyectos":
                             nuevo_gasto = pd.DataFrame([{"Proyecto": nombre_p, "Detalle_Gasto": "Materiales iniciales", "Monto": 0, "Dias_Asignados": 0}])
                             st.session_state.proyectos_resumen = pd.concat([st.session_state.proyectos_resumen, nuevo_resumen], ignore_index=True)
                             st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto], ignore_index=True)
-                            guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
-                            guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                            st.success(f"Carpeta '{nombre_p}' creada en {ciudad_final}.")
-                            st.rerun()
+                            ok_r = guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen, refrescar_ui=False)
+                            ok_g = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos, refrescar_ui=False)
+                            if ok_r and ok_g:
+                                refrescar_app_tras_guardado(True, mensaje_flash=f"Carpeta '{nombre_p}' creada en {ciudad_final}.")
 
         proyectos_lista = st.session_state.proyectos_resumen["Proyecto"].tolist()
         if proyectos_lista:
@@ -2595,10 +2621,12 @@ elif st.session_state.menu_actual == "Proyectos":
                                     "Dias_Asignados": float(dias_manual_g),
                                 }])
                                 st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_manual], ignore_index=True)
-                                ok = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                                if ok:
-                                    st.success("Gasto añadido correctamente en Google Sheets.")
-                                st.rerun()
+                                guardar_datos(
+                                    "Proyectos_Gastos",
+                                    st.session_state.proyectos_gastos,
+                                    refrescar_ui=True,
+                                    mensaje_flash="Gasto añadido correctamente.",
+                                )
 
                         st.divider()
                         cols_g = ["Detalle_Gasto", "Monto", "Dias_Asignados"]
@@ -2632,10 +2660,12 @@ elif st.session_state.menu_actual == "Proyectos":
                                 df_tmp["Dias_Asignados"] = pd.to_numeric(df_tmp["Dias_Asignados"], errors="coerce").fillna(0)
                                 df_tmp["Monto"] = pd.to_numeric(df_tmp["Monto"], errors="coerce").fillna(0)
                                 st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_tmp], ignore_index=True)
-                                ok = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                                if ok:
-                                    st.success("Gastos actualizados correctamente en Google Sheets.")
-                                st.rerun()
+                                guardar_datos(
+                                    "Proyectos_Gastos",
+                                    st.session_state.proyectos_gastos,
+                                    refrescar_ui=True,
+                                    mensaje_flash="Gastos actualizados correctamente.",
+                                )
 
                         with c_gdel:
                             with st.popover("🗑️ Eliminar 1 gasto"):
@@ -2661,8 +2691,7 @@ elif st.session_state.menu_actual == "Proyectos":
                                         ok_api = eliminar_fila_google_sheet("Proyectos_Gastos", row_sheet)
                                         if ok_api:
                                             st.session_state.proyectos_gastos = df_full.drop(index=pos_full).reset_index(drop=True)
-                                            st.success("Gasto eliminado correctamente en Google Sheets.")
-                                            st.rerun()
+                                            refrescar_app_tras_guardado(True, mensaje_flash="Gasto eliminado correctamente.")
                     else:
                         cols_show = [c for c in ["Detalle_Gasto", "Monto", "Dias_Asignados"] if c in df_gastos_proy.columns]
                         if not cols_show:
@@ -2734,8 +2763,12 @@ elif st.session_state.menu_actual == "Proyectos":
                                             "Dias_Asignados": dias_efectivos,
                                         }])
                                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
-                                        guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                                        st.rerun()
+                                        guardar_datos(
+                                            "Proyectos_Gastos",
+                                            st.session_state.proyectos_gastos,
+                                            refrescar_ui=True,
+                                            mensaje_flash="Cargo por días añadido al gasto del proyecto.",
+                                        )
                                 else:
                                     horas_input = st.number_input("Horas a imputar al proyecto:", min_value=0.5, step=0.5, value=10.0, key=f"pers_hrs_{proyecto_seleccionado}")
                                     costo_calc = horas_input * valor_hora_costo
@@ -2748,8 +2781,12 @@ elif st.session_state.menu_actual == "Proyectos":
                                             "Dias_Asignados": 0,
                                         }])
                                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, nuevo_gasto_trab], ignore_index=True)
-                                        guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                                        st.rerun()
+                                        guardar_datos(
+                                            "Proyectos_Gastos",
+                                            st.session_state.proyectos_gastos,
+                                            refrescar_ui=True,
+                                            mensaje_flash="Cargo por horas añadido al gasto del proyecto.",
+                                        )
 
             gastos_totales = pd.to_numeric(df_gastos_editados["Monto"], errors='coerce').sum()
             ganancia_proyecto = nuevo_cobro - gastos_totales
@@ -2769,24 +2806,25 @@ elif st.session_state.menu_actual == "Proyectos":
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
                         df_gastos_editados["Proyecto"] = proyecto_seleccionado
                         st.session_state.proyectos_gastos = pd.concat([st.session_state.proyectos_gastos, df_gastos_editados], ignore_index=True)
-                        ok1 = guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
-                        ok2 = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
+                        ok1 = guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen, refrescar_ui=False)
+                        ok2 = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos, refrescar_ui=False)
                         if ok1 and ok2:
-                            st.success("Guardado correctamente en Google Sheets.")
+                            refrescar_app_tras_guardado(True, mensaje_flash="Finanzas del proyecto guardadas.")
                 with col_del:
                     if st.button("🗑️ Eliminar Proyecto Completo", use_container_width=True):
                         st.session_state.proyectos_resumen = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] != proyecto_seleccionado]
                         st.session_state.proyectos_gastos = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] != proyecto_seleccionado]
+                        ok_del = True
                         if 'proyectos_equipo' in st.session_state:
                             st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] != proyecto_seleccionado]
-                            guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
+                            ok_del = guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo, refrescar_ui=False) and ok_del
                         if 'operaciones_tareas' in st.session_state:
                             st.session_state.operaciones_tareas = st.session_state.operaciones_tareas[st.session_state.operaciones_tareas["Proyecto"] != proyecto_seleccionado]
-                            guardar_datos("Operaciones_Tareas", st.session_state.operaciones_tareas)
-                            limpiar_cache_streamlit()
-                        guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
-                        guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
-                        st.rerun()
+                            ok_del = guardar_datos("Operaciones_Tareas", st.session_state.operaciones_tareas, refrescar_ui=False) and ok_del
+                        ok_del = guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen, refrescar_ui=False) and ok_del
+                        ok_del = guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos, refrescar_ui=False) and ok_del
+                        if ok_del:
+                            refrescar_app_tras_guardado(True, mensaje_flash="Proyecto eliminado correctamente.")
 
 # ==========================================
 # PANTALLA 4: OPERACIONES — TABLERO MONDAY
