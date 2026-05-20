@@ -8,7 +8,15 @@ import calendar
 import os
 import tempfile
 import altair as alt
+import plotly.express as px
 import uuid
+
+COLOR_ESTADO_OPS = {
+    "⚪ Pendiente": "#94a3b8",
+    "🟡 En Proceso": "#eab308",
+    "🔴 Estancado": "#ef4444",
+    "🟢 Listo": "#22c55e",
+}
 
 # Intentar importar FPDF de forma segura
 try:
@@ -75,6 +83,7 @@ def guardar_datos(nombre_hoja, df):
             'RUT', 'Gratificacion', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Termino', 'Fecha_Emision',
             'Num_OC', 'Fecha_Inicio_Proy', 'Fecha_Termino_Proy', 'Duracion_Proy', 'Nro_Serie',
             'Nombre_Material', 'Descripcion', 'Unidad', 'Tipo_Movimiento', 'Persona_Responsable', 'Destino', 'Fecha',
+            'Prioridad', 'Estado', 'Tarea', 'Proyecto', 'Trabajador',
         ]
         for col in columnas_str:
             if col in df_clean.columns: df_clean[col] = df_clean[col].astype(str)
@@ -220,16 +229,89 @@ if 'proyectos_equipo' not in st.session_state:
     df_equipo_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Rol_Proyecto"])
     st.session_state.proyectos_equipo = cargar_datos("Proyectos_Equipo", df_equipo_base)
 
-if 'proyectos_tareas' not in st.session_state:
-    df_tareas_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino", "Dias_Duracion"])
-    st.session_state.proyectos_tareas = cargar_datos("Proyectos_Tareas", df_tareas_base)
+COLUMNAS_OPERACIONES_TAREAS = [
+    "Tarea", "Proyecto", "Trabajador", "Estado", "Prioridad",
+    "Fecha_Inicio", "Fecha_Termino", "Dias_Duracion",
+]
+ESTADOS_TAREA_OPERACIONES = ["⚪ Pendiente", "🟡 En Proceso", "🔴 Estancado", "🟢 Listo"]
+PRIORIDADES_TAREA = ["🔥 Alta", "⚡ Media", "💤 Baja"]
 
-if 'Fecha_Inicio' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Fecha_Inicio'] = datetime.date.today().strftime('%Y-%m-%d')
-if 'Fecha_Termino' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Fecha_Termino'] = datetime.date.today().strftime('%Y-%m-%d')
-if 'Dias_Duracion' not in st.session_state.proyectos_tareas.columns:
-    st.session_state.proyectos_tareas['Dias_Duracion'] = float('nan')
+def normalizar_estado_tarea(valor):
+    s = str(valor or "").strip()
+    if s in ESTADOS_TAREA_OPERACIONES:
+        return s
+    sl = s.lower()
+    if "listo" in sl or "terminad" in sl or "complet" in sl:
+        return "🟢 Listo"
+    if "estancad" in sl:
+        return "🔴 Estancado"
+    if "proceso" in sl or "curso" in sl:
+        return "🟡 En Proceso"
+    return "⚪ Pendiente"
+
+def _fecha_tarea_a_str(val):
+    try:
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return datetime.date.today().strftime("%Y-%m-%d")
+        if isinstance(val, datetime.date):
+            return val.strftime("%Y-%m-%d")
+        d = pd.to_datetime(str(val).strip(), errors="coerce")
+        if pd.isna(d):
+            return datetime.date.today().strftime("%Y-%m-%d")
+        return d.date().strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.date.today().strftime("%Y-%m-%d")
+
+def normalizar_prioridad_tarea(valor):
+    s = str(valor or "").strip()
+    if s in PRIORIDADES_TAREA:
+        return s
+    sl = s.lower()
+    if "alta" in sl or "🔥" in s:
+        return "🔥 Alta"
+    if "media" in sl or "⚡" in s:
+        return "⚡ Media"
+    return "💤 Baja"
+
+def sanitizar_operaciones_tareas(df):
+    if df is None or df.empty:
+        return pd.DataFrame(columns=COLUMNAS_OPERACIONES_TAREAS)
+    out = df.copy()
+    for col in COLUMNAS_OPERACIONES_TAREAS:
+        if col not in out.columns:
+            if col == "Prioridad":
+                out[col] = "💤 Baja"
+            elif col == "Estado":
+                out[col] = "⚪ Pendiente"
+            elif col == "Dias_Duracion":
+                out[col] = float("nan")
+            else:
+                out[col] = ""
+    out = out[COLUMNAS_OPERACIONES_TAREAS]
+    out["Estado"] = out["Estado"].apply(normalizar_estado_tarea)
+    out["Prioridad"] = out["Prioridad"].apply(normalizar_prioridad_tarea)
+    out["Fecha_Inicio"] = out["Fecha_Inicio"].apply(_fecha_tarea_a_str)
+    out["Fecha_Termino"] = out["Fecha_Termino"].apply(_fecha_tarea_a_str)
+    out["Dias_Duracion"] = pd.to_numeric(out["Dias_Duracion"], errors="coerce")
+    return out
+
+if 'operaciones_tareas' not in st.session_state:
+    df_tareas_base = pd.DataFrame(columns=COLUMNAS_OPERACIONES_TAREAS)
+    ops_cargadas = cargar_datos("Operaciones_Tareas", df_tareas_base)
+    if ops_cargadas.empty:
+        legacy_base = pd.DataFrame(columns=["Proyecto", "Trabajador", "Tarea", "Estado", "Fecha_Inicio", "Fecha_Termino", "Dias_Duracion"])
+        legacy = cargar_datos("Proyectos_Tareas", legacy_base)
+        if not legacy.empty:
+            if "Prioridad" not in legacy.columns:
+                legacy["Prioridad"] = "💤 Baja"
+            cols = [c for c in COLUMNAS_OPERACIONES_TAREAS if c in legacy.columns]
+            ops_cargadas = legacy[cols].copy()
+            ops_cargadas = sanitizar_operaciones_tareas(ops_cargadas)
+            guardar_datos("Operaciones_Tareas", ops_cargadas)
+    st.session_state.operaciones_tareas = sanitizar_operaciones_tareas(ops_cargadas)
+
+if 'ops_tareas_rev' not in st.session_state:
+    st.session_state.ops_tareas_rev = 0
 
 if 'gastos_fijos' not in st.session_state:
     df_fijos_base = pd.DataFrame([{"Descripción": "Arriendo Oficina", "Monto (CLP)": 350000}, {"Descripción": "prioridad emergencias", "Monto (CLP)": 50000}])
@@ -309,30 +391,71 @@ def opciones_material_bodega(df_stock):
         mapa[label] = cod
     return opts, mapa
 
+def limpiar_cache_streamlit():
+    if hasattr(st, "cache_data"):
+        st.cache_data.clear()
+
+def guardar_operaciones_tareas():
+    """Persiste el tablero en Operaciones_Tareas y refresca caché de Streamlit."""
+    st.session_state.operaciones_tareas = sanitizar_operaciones_tareas(st.session_state.operaciones_tareas)
+    st.session_state.operaciones_tareas = _migrar_dias_duracion_tareas(st.session_state.operaciones_tareas)
+    ok = guardar_datos("Operaciones_Tareas", st.session_state.operaciones_tareas)
+    limpiar_cache_streamlit()
+    st.session_state.ops_tareas_rev = int(st.session_state.get("ops_tareas_rev", 0)) + 1
+    st.session_state.pop(f"ed_ops_tareas_{st.session_state.ops_tareas_rev - 1}", None)
+    return ok
+
+def recargar_bodega_stock_desde_sheets():
+    """Lee el stock vigente desde la hoja Bodega_Stock (fuente de verdad)."""
+    base = pd.DataFrame(columns=COLUMNAS_BODEGA_STOCK)
+    st.session_state.bodega_stock = sanitizar_bodega_stock(cargar_datos("Bodega_Stock", base))
+
+def stock_actual_material(codigo):
+    """Stock entero actual de un código en session_state."""
+    stock = sanitizar_bodega_stock(st.session_state.bodega_stock)
+    fila = stock[stock["Codigo"] == int(codigo)]
+    if fila.empty:
+        return None
+    return int(fila.iloc[0]["Cantidad"])
+
 def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, destino):
-    """Actualiza stock y añade fila al historial. Retorna (ok, mensaje)."""
-    cantidad = int(cantidad)
+    """
+    Lee Bodega_Stock, aplica entrada/salida (enteros), persiste stock + historial en Sheets.
+    Retorna (ok, mensaje, stock_resultante o None).
+    """
+    recargar_bodega_stock_desde_sheets()
+
+    cantidad = int(round(float(cantidad)))
     if cantidad <= 0:
-        return False, "La cantidad debe ser un entero mayor a 0."
+        return False, "La cantidad debe ser un entero mayor a 0.", None
+
     codigo = int(codigo)
     tipo_mov = str(tipo_mov).strip()
     if tipo_mov not in ("Entrada", "Salida"):
-        return False, "Tipo de movimiento inválido."
+        return False, "Tipo de movimiento inválido.", None
 
     stock = sanitizar_bodega_stock(st.session_state.bodega_stock)
     fila = stock[stock["Codigo"] == codigo]
     if fila.empty:
-        return False, f"No existe material con código {codigo}."
+        return False, f"No existe material con código {codigo}.", None
+
     idx = fila.index[0]
     nombre = str(stock.at[idx, "Nombre_Material"])
     stock_actual = int(stock.at[idx, "Cantidad"])
 
-    if tipo_mov == "Salida" and stock_actual < cantidad:
-        return False, f"Stock insuficiente. Disponible: {stock_actual}, solicitado: {cantidad}."
+    if tipo_mov == "Salida" and cantidad > stock_actual:
+        return False, f"Cantidad insuficiente en bodega. Stock actual: {stock_actual}", stock_actual
 
-    nuevo_stock = stock_actual + cantidad if tipo_mov == "Entrada" else stock_actual - cantidad
-    stock.at[idx, "Cantidad"] = int(nuevo_stock)
-    st.session_state.bodega_stock = stock
+    if tipo_mov == "Entrada":
+        nuevo_stock = int(stock_actual + cantidad)
+    else:
+        nuevo_stock = int(stock_actual - cantidad)
+
+    if nuevo_stock < 0:
+        return False, f"Cantidad insuficiente en bodega. Stock actual: {stock_actual}", stock_actual
+
+    stock.at[idx, "Cantidad"] = nuevo_stock
+    st.session_state.bodega_stock = sanitizar_bodega_stock(stock)
 
     fecha_str = fecha.strftime("%Y-%m-%d") if hasattr(fecha, "strftime") else str(fecha)
     nueva_fila = pd.DataFrame([{
@@ -340,17 +463,32 @@ def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, dest
         "Tipo_Movimiento": tipo_mov,
         "Codigo": codigo,
         "Nombre_Material": nombre,
-        "Cantidad": cantidad,
+        "Cantidad": int(cantidad),
         "Persona_Responsable": str(persona).strip(),
         "Destino": str(destino).strip(),
         "Stock_Resultante": int(nuevo_stock),
     }])
     hist = sanitizar_bodega_historial(st.session_state.bodega_historial)
-    st.session_state.bodega_historial = pd.concat([hist, nueva_fila], ignore_index=True)
+    st.session_state.bodega_historial = sanitizar_bodega_historial(
+        pd.concat([hist, nueva_fila], ignore_index=True)
+    )
 
-    guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
-    guardar_datos("Bodega_Historial", st.session_state.bodega_historial)
-    return True, f"{tipo_mov} registrada. Stock actual de {codigo}: {nuevo_stock} un."
+    if not guardar_datos("Bodega_Stock", st.session_state.bodega_stock):
+        return False, "No se pudo actualizar Bodega_Stock en Google Sheets.", stock_actual
+    if not guardar_datos("Bodega_Historial", st.session_state.bodega_historial):
+        return False, "Stock actualizado, pero falló el guardado del historial.", nuevo_stock
+
+    refrescar_widgets_bodega_tras_movimiento()
+
+    return True, f"{tipo_mov} registrada. Stock actualizado: {nuevo_stock} un.", nuevo_stock
+
+def refrescar_widgets_bodega_tras_movimiento():
+    """Sincroniza UI tras cambio de stock: caché, revisión de widgets y data_editor."""
+    limpiar_cache_streamlit()
+    rev_anterior = int(st.session_state.get("bod_stock_rev", 0))
+    st.session_state.bod_stock_rev = rev_anterior + 1
+    st.session_state.pop(f"ed_bodega_stock_{rev_anterior}", None)
+    st.session_state.pop("ed_bodega_stock", None)
 
 st.session_state.bodega_stock = sanitizar_bodega_stock(st.session_state.bodega_stock)
 st.session_state.bodega_historial = sanitizar_bodega_historial(st.session_state.bodega_historial)
@@ -411,8 +549,91 @@ def parse_fecha_celda(val):
         return None
 
 def tarea_activa_capacidad(estado):
-    s = str(estado or "")
-    return "Terminada" not in s
+    s = str(estado or "").lower()
+    return not any(x in s for x in ("listo", "terminad", "complet"))
+
+def filtrar_tareas_operaciones(df, proyecto, trabajador, estado):
+    out = sanitizar_operaciones_tareas(df)
+    if proyecto and proyecto != "Todos":
+        out = out[out["Proyecto"] == proyecto]
+    if trabajador and trabajador != "Todos":
+        out = out[out["Trabajador"] == trabajador]
+    if estado and estado != "Todos":
+        out = out[out["Estado"] == estado]
+    return out
+
+def filtrar_tareas_rango_fechas(df, fecha_desde, fecha_hasta):
+    """Tareas cuyo cronograma intersecta el rango [fecha_desde, fecha_hasta]."""
+    if df is None or df.empty:
+        return df
+    if fecha_desde is None or fecha_hasta is None:
+        return df
+    if fecha_hasta < fecha_desde:
+        fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+    filas = []
+    for idx, row in df.iterrows():
+        fi = parse_fecha_celda(row.get("Fecha_Inicio"))
+        ff = parse_fecha_celda(row.get("Fecha_Termino"))
+        if not fi or not ff:
+            continue
+        if ff < fi:
+            fi, ff = ff, fi
+        if fi <= fecha_hasta and ff >= fecha_desde:
+            filas.append(idx)
+    if not filas:
+        return df.iloc[0:0]
+    return df.loc[filas]
+
+def tarea_solapa_mes(f_ini, f_fin, year, month):
+    first = datetime.date(year, month, 1)
+    last = datetime.date(year, month, calendar.monthrange(year, month)[1])
+    return f_ini <= last and f_fin >= first
+
+def df_distribucion_mes(df_tareas, year, month):
+    rows = []
+    for _, row in sanitizar_operaciones_tareas(df_tareas).iterrows():
+        fi = parse_fecha_celda(row.get("Fecha_Inicio"))
+        ff = parse_fecha_celda(row.get("Fecha_Termino"))
+        if not fi or not ff:
+            continue
+        if ff < fi:
+            fi, ff = ff, fi
+        if not tarea_solapa_mes(fi, ff, year, month):
+            continue
+        rows.append({
+            "Trabajador": row["Trabajador"],
+            "Proyecto": row["Proyecto"],
+            "Tarea": row["Tarea"],
+            "Estado": row["Estado"],
+            "Prioridad": row["Prioridad"],
+            "Inicio": fi.strftime("%d/%m/%Y"),
+            "Término": ff.strftime("%d/%m/%Y"),
+        })
+    if not rows:
+        return pd.DataFrame(columns=["Trabajador", "Proyecto", "Tarea", "Estado", "Prioridad", "Inicio", "Término"])
+    return pd.DataFrame(rows)
+
+def detectar_solapes_mes(df_tareas, year, month):
+    avisos = []
+    df = sanitizar_operaciones_tareas(df_tareas)
+    for trab in sorted(df["Trabajador"].dropna().unique()):
+        bloques = []
+        for _, row in df[df["Trabajador"] == trab].iterrows():
+            fi = parse_fecha_celda(row.get("Fecha_Inicio"))
+            ff = parse_fecha_celda(row.get("Fecha_Termino"))
+            if not fi or not ff:
+                continue
+            if ff < fi:
+                fi, ff = ff, fi
+            if tarea_solapa_mes(fi, ff, year, month):
+                bloques.append((str(row["Tarea"]), str(row["Proyecto"]), fi, ff))
+        bloques.sort(key=lambda x: x[2])
+        for i in range(len(bloques) - 1):
+            t1, p1, a1, b1 = bloques[i]
+            t2, p2, a2, b2 = bloques[i + 1]
+            if b1 >= a2:
+                avisos.append(f"**{trab}**: «{t1}» ({p1}) se superpone con «{t2}» ({p2}).")
+    return avisos
 
 def carga_trabajador_mes(df_tareas, trabajador, year, month):
     """
@@ -536,15 +757,15 @@ def render_panel_capacidad_trabajadores(df_tareas, lista_trabajadores, key_suffi
     st.dataframe(df_tab, use_container_width=True, hide_index=True)
 
 def _wos_cambiar_estado_tarea(idx, nuevo_estado, mensaje="Estado actualizado"):
-    st.session_state.proyectos_tareas.at[idx, "Estado"] = nuevo_estado
-    guardar_datos_diferido("Proyectos_Tareas", st.session_state.proyectos_tareas)
+    st.session_state.operaciones_tareas.at[idx, "Estado"] = normalizar_estado_tarea(nuevo_estado)
+    guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
     if hasattr(st, "toast"):
         st.toast(mensaje, icon="✅")
 
 def _render_wos_tablero(proyecto_seg):
     """Tablero Kanban / lista (dentro del fragmento Work OS)."""
-    tareas_proy = st.session_state.proyectos_tareas[
-        st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+    tareas_proy = st.session_state.operaciones_tareas[
+        st.session_state.operaciones_tareas["Proyecto"] == proyecto_seg
     ]
     lista_trabajadores_nomina = st.session_state.nomina["Trabajador"].tolist()
     if not lista_trabajadores_nomina:
@@ -573,18 +794,19 @@ def _render_wos_tablero(proyecto_seg):
         if st.button("Crear Tarea", use_container_width=True, key=f"wos_btn_new_{proyecto_seg}"):
             if desc_tarea:
                 nueva_tarea = pd.DataFrame([{
+                    "Tarea": desc_tarea,
                     "Proyecto": proyecto_seg,
                     "Trabajador": encargado_tarea,
-                    "Tarea": desc_tarea,
-                    "Estado": "🔴 Pendiente",
+                    "Estado": "⚪ Pendiente",
+                    "Prioridad": "💤 Baja",
                     "Fecha_Inicio": f_ini_tarea.strftime("%Y-%m-%d"),
                     "Fecha_Termino": f_fin_tarea.strftime("%Y-%m-%d"),
                     "Dias_Duracion": float(dias_duracion_nueva),
                 }])
-                st.session_state.proyectos_tareas = pd.concat(
-                    [st.session_state.proyectos_tareas, nueva_tarea], ignore_index=True
+                st.session_state.operaciones_tareas = pd.concat(
+                    [st.session_state.operaciones_tareas, nueva_tarea], ignore_index=True
                 )
-                guardar_datos_diferido("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
                 if hasattr(st, "toast"):
                     st.toast("Tarea asignada.", icon="✅")
             else:
@@ -608,44 +830,53 @@ def _render_wos_tablero(proyecto_seg):
     if filtro_trabajador != "👥 Todos":
         df_vista_filtrada = tareas_proy[tareas_proy["Trabajador"] == filtro_trabajador].copy()
         mask_reemplazo = (
-            (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg)
-            & (st.session_state.proyectos_tareas["Trabajador"] == filtro_trabajador)
+            (st.session_state.operaciones_tareas["Proyecto"] == proyecto_seg)
+            & (st.session_state.operaciones_tareas["Trabajador"] == filtro_trabajador)
         )
     else:
         df_vista_filtrada = tareas_proy.copy()
-        mask_reemplazo = st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+        mask_reemplazo = st.session_state.operaciones_tareas["Proyecto"] == proyecto_seg
 
     if tipo_vista == "📌 Kanban Interactivo":
-        col_pend, col_proc, col_term = st.columns(3)
+        col_pend, col_proc, col_est, col_listo = st.columns(4)
         with col_pend:
-            st.markdown("<h4 style='text-align: center; color: #ef4444;'>🔴 Pendiente</h4>", unsafe_allow_html=True)
-            for idx, row in df_vista_filtrada[df_vista_filtrada["Estado"].str.contains("Pendiente", na=False)].iterrows():
+            st.markdown("<h4 style='text-align: center; color: #94a3b8;'>⚪ Pendiente</h4>", unsafe_allow_html=True)
+            for idx, row in df_vista_filtrada[df_vista_filtrada["Estado"] == "⚪ Pendiente"].iterrows():
                 with st.container(border=True):
                     st.markdown(f"**{row['Tarea']}**")
                     st.caption(f"👤 {row['Trabajador']} | 📅 {row['Fecha_Termino']}")
                     if st.button("▶️ Iniciar", key=f"start_{proyecto_seg}_{idx}", use_container_width=True):
-                        _wos_cambiar_estado_tarea(idx, "🟡 En proceso", "Tarea en proceso")
+                        _wos_cambiar_estado_tarea(idx, "🟡 En Proceso", "Tarea en proceso")
 
         with col_proc:
-            st.markdown("<h4 style='text-align: center; color: #eab308;'>🟡 En proceso</h4>", unsafe_allow_html=True)
-            for idx, row in df_vista_filtrada[df_vista_filtrada["Estado"].str.contains("proceso", na=False)].iterrows():
+            st.markdown("<h4 style='text-align: center; color: #eab308;'>🟡 En Proceso</h4>", unsafe_allow_html=True)
+            for idx, row in df_vista_filtrada[df_vista_filtrada["Estado"] == "🟡 En Proceso"].iterrows():
                 with st.container(border=True):
                     st.markdown(f"**{row['Tarea']}**")
                     st.caption(f"👤 {row['Trabajador']} | 📅 {row['Fecha_Termino']}")
                     c1, c2 = st.columns(2)
-                    if c1.button("⏸️ Pausar", key=f"pause_{proyecto_seg}_{idx}", use_container_width=True):
-                        _wos_cambiar_estado_tarea(idx, "🔴 Pendiente", "Tarea pausada")
+                    if c1.button("⏸️ Estancar", key=f"pause_{proyecto_seg}_{idx}", use_container_width=True):
+                        _wos_cambiar_estado_tarea(idx, "🔴 Estancado", "Tarea estancada")
                     if c2.button("✅ Listo", key=f"done_{proyecto_seg}_{idx}", use_container_width=True):
-                        _wos_cambiar_estado_tarea(idx, "🟢 Terminada", "Tarea terminada")
+                        _wos_cambiar_estado_tarea(idx, "🟢 Listo", "Tarea completada")
 
-        with col_term:
-            st.markdown("<h4 style='text-align: center; color: #22c55e;'>🟢 Terminada</h4>", unsafe_allow_html=True)
-            for idx, row in df_vista_filtrada[df_vista_filtrada["Estado"].str.contains("Terminada", na=False)].iterrows():
+        with col_est:
+            st.markdown("<h4 style='text-align: center; color: #ef4444;'>🔴 Estancado</h4>", unsafe_allow_html=True)
+            for idx, row in df_vista_filtrada[df_vista_filtrada["Estado"] == "🔴 Estancado"].iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**{row['Tarea']}**")
+                    st.caption(f"👤 {row['Trabajador']} | 📅 {row['Fecha_Termino']}")
+                    if st.button("▶️ Reanudar", key=f"resume_{proyecto_seg}_{idx}", use_container_width=True):
+                        _wos_cambiar_estado_tarea(idx, "🟡 En Proceso", "Tarea reanudada")
+
+        with col_listo:
+            st.markdown("<h4 style='text-align: center; color: #22c55e;'>🟢 Listo</h4>", unsafe_allow_html=True)
+            for idx, row in df_vista_filtrada[df_vista_filtrada["Estado"] == "🟢 Listo"].iterrows():
                 with st.container(border=True):
                     st.markdown(f"**{row['Tarea']}**")
                     st.caption(f"👤 {row['Trabajador']} | 📅 {row['Fecha_Termino']}")
                     if st.button("↩️ Reabrir", key=f"revert_{proyecto_seg}_{idx}", use_container_width=True):
-                        _wos_cambiar_estado_tarea(idx, "🟡 En proceso", "Tarea reabierta")
+                        _wos_cambiar_estado_tarea(idx, "🟡 En Proceso", "Tarea reabierta")
     else:
         df_vista_filtrada = df_vista_filtrada.copy()
         df_vista_filtrada["Fecha_Inicio"] = pd.to_datetime(df_vista_filtrada["Fecha_Inicio"], errors="coerce").dt.date
@@ -657,7 +888,8 @@ def _render_wos_tablero(proyecto_seg):
         df_tareas_editadas = st.data_editor(
             df_vista_filtrada,
             column_config={
-                "Estado": st.column_config.SelectboxColumn("Estado", options=["🔴 Pendiente", "🟡 En proceso", "🟢 Terminada"]),
+                "Estado": st.column_config.SelectboxColumn("Estado", options=ESTADOS_TAREA_OPERACIONES),
+                "Prioridad": st.column_config.SelectboxColumn("Prioridad", options=PRIORIDADES_TAREA),
                 "Fecha_Inicio": st.column_config.DateColumn("Inicio"),
                 "Fecha_Termino": st.column_config.DateColumn("Fin"),
                 "Dias_Duracion": st.column_config.NumberColumn("Días duración (háb.)", min_value=0.5, step=0.5, format="%.1f"),
@@ -672,11 +904,11 @@ def _render_wos_tablero(proyecto_seg):
             df_tareas_editadas["Fecha_Inicio"] = df_tareas_editadas["Fecha_Inicio"].astype(str)
             df_tareas_editadas["Fecha_Termino"] = df_tareas_editadas["Fecha_Termino"].astype(str)
             df_tareas_editadas["Dias_Duracion"] = pd.to_numeric(df_tareas_editadas["Dias_Duracion"], errors="coerce").fillna(1.0)
-            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_reemplazo]
-            st.session_state.proyectos_tareas = pd.concat(
-                [st.session_state.proyectos_tareas, df_tareas_editadas], ignore_index=True
+            st.session_state.operaciones_tareas = st.session_state.operaciones_tareas[~mask_reemplazo]
+            st.session_state.operaciones_tareas = pd.concat(
+                [st.session_state.operaciones_tareas, df_tareas_editadas], ignore_index=True
             )
-            guardar_datos_diferido("Proyectos_Tareas", st.session_state.proyectos_tareas)
+            guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
             if hasattr(st, "toast"):
                 st.toast("Estados actualizados.", icon="✅")
 
@@ -689,12 +921,12 @@ def _render_wos_tablero(proyecto_seg):
                 nombre_tarea = tarea_a_eliminar.rsplit(" (", 1)[0]
                 nombre_trab = tarea_a_eliminar.rsplit(" (", 1)[1].replace(")", "")
                 mask_eliminar = (
-                    (st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg)
-                    & (st.session_state.proyectos_tareas["Tarea"] == nombre_tarea)
-                    & (st.session_state.proyectos_tareas["Trabajador"] == nombre_trab)
+                    (st.session_state.operaciones_tareas["Proyecto"] == proyecto_seg)
+                    & (st.session_state.operaciones_tareas["Tarea"] == nombre_tarea)
+                    & (st.session_state.operaciones_tareas["Trabajador"] == nombre_trab)
                 )
-                st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[~mask_eliminar]
-                guardar_datos_diferido("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                st.session_state.operaciones_tareas = st.session_state.operaciones_tareas[~mask_eliminar]
+                guardar_datos_diferido("Operaciones_Tareas", st.session_state.operaciones_tareas)
                 if hasattr(st, "toast"):
                     st.toast("Tarea eliminada.", icon="🗑️")
 
@@ -762,11 +994,11 @@ def _render_wos_equipo(proyecto_seg):
 @_st_fragment
 def _fragment_wos_workspace(proyecto_seg, idx_p_seg):
     """Proyecto activo: reruns aislados del resto del ERP (Finanzas, Balance, etc.)."""
-    tareas_proy = st.session_state.proyectos_tareas[
-        st.session_state.proyectos_tareas["Proyecto"] == proyecto_seg
+    tareas_proy = st.session_state.operaciones_tareas[
+        st.session_state.operaciones_tareas["Proyecto"] == proyecto_seg
     ]
     total_t = len(tareas_proy)
-    terminadas = len(tareas_proy[tareas_proy["Estado"].str.contains("Terminada", na=False)]) if total_t > 0 else 0
+    terminadas = len(tareas_proy[tareas_proy["Estado"].str.contains("Listo|Terminada", na=False, case=False, regex=True)]) if total_t > 0 else 0
     porc = int((terminadas / total_t) * 100) if total_t > 0 else 0
 
     st.markdown(f"#### 🚀 Proyecto: {proyecto_seg}")
@@ -776,7 +1008,7 @@ def _fragment_wos_workspace(proyecto_seg, idx_p_seg):
     with st.container(border=True):
         st.markdown("##### 📊 Capacidad del equipo por mes")
         lista_nom_cap = st.session_state.nomina["Trabajador"].tolist()
-        render_panel_capacidad_trabajadores(st.session_state.proyectos_tareas, lista_nom_cap, key_suffix="ops_wos")
+        render_panel_capacidad_trabajadores(st.session_state.operaciones_tareas, lista_nom_cap, key_suffix="ops_wos")
     st.write("")
 
     tab_tablero, tab_gantt, tab_equipo, tab_config = st.tabs(
@@ -800,8 +1032,8 @@ def _fragment_wos_workspace(proyecto_seg, idx_p_seg):
                 color=alt.Color(
                     "Estado:N",
                     scale=alt.Scale(
-                        domain=["🔴 Pendiente", "🟡 En proceso", "🟢 Terminada"],
-                        range=["#ef4444", "#eab308", "#22c55e"],
+                        domain=ESTADOS_TAREA_OPERACIONES,
+                        range=["#94a3b8", "#eab308", "#ef4444", "#22c55e"],
                     ),
                 ),
                 tooltip=["Tarea", "Trabajador", "Estado", "Fecha_Inicio", "Fecha_Termino"],
@@ -850,6 +1082,537 @@ def _fragment_wos_workspace(proyecto_seg, idx_p_seg):
 
     flush_guardados_diferidos()
 
+def preparar_datos_gantt(df_tareas):
+    """DataFrame listo para px.timeline (Start, Finish, etiquetas)."""
+    if df_tareas is None or df_tareas.empty:
+        return pd.DataFrame()
+    out = sanitizar_operaciones_tareas(df_tareas).copy()
+    out["Start"] = pd.to_datetime(out["Fecha_Inicio"], errors="coerce")
+    out["Finish"] = pd.to_datetime(out["Fecha_Termino"], errors="coerce")
+    out = out.dropna(subset=["Start", "Finish"])
+    if out.empty:
+        return out
+    invertidas = out["Finish"] < out["Start"]
+    if invertidas.any():
+        tmp = out.loc[invertidas, "Start"].copy()
+        out.loc[invertidas, "Start"] = out.loc[invertidas, "Finish"]
+        out.loc[invertidas, "Finish"] = tmp
+    mismo_dia = out["Finish"] == out["Start"]
+    if mismo_dia.any():
+        out.loc[mismo_dia, "Finish"] = out.loc[mismo_dia, "Start"] + pd.Timedelta(days=1)
+    out["Barra"] = out["Tarea"].astype(str) + " (" + out["Proyecto"].astype(str) + ")"
+    return out
+
+def figura_gantt_plotly(df_gantt, color_por="Estado"):
+    if df_gantt is None or df_gantt.empty:
+        return None
+    color_por = color_por if color_por in ("Estado", "Proyecto") else "Estado"
+    fig = px.timeline(
+        df_gantt,
+        x_start="Start",
+        x_end="Finish",
+        y="Barra",
+        color=color_por,
+        color_discrete_map=COLOR_ESTADO_OPS if color_por == "Estado" else None,
+        custom_data=["Trabajador", "Proyecto", "Estado", "Prioridad", "Tarea"],
+    )
+    fig.update_traces(
+        hovertemplate=(
+            "<b>%{customdata[4]}</b><br>"
+            "Responsable: %{customdata[0]}<br>"
+            "Proyecto: %{customdata[1]}<br>"
+            "Estado: %{customdata[2]}<br>"
+            "Prioridad: %{customdata[3]}<br>"
+            "%{x|%d/%m/%Y} → %{x2|%d/%m/%Y}<extra></extra>"
+        )
+    )
+    fig.update_layout(
+        height=max(420, min(1000, len(df_gantt) * 44)),
+        autosize=True,
+        xaxis_title="Línea de tiempo",
+        yaxis_title="",
+        legend_title=color_por,
+        margin=dict(l=12, r=12, t=48, b=12),
+        bargap=0.12,
+    )
+    fig.update_yaxes(autorange="reversed")
+    return fig
+
+def metricas_rendimiento_operaciones(df_tareas):
+    df = sanitizar_operaciones_tareas(df_tareas)
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    por_estado = (
+        df.groupby("Estado", as_index=False)
+        .size()
+        .rename(columns={"size": "Cantidad"})
+        .sort_values("Cantidad", ascending=False)
+    )
+    avance_rows = []
+    for proy, grp in df.groupby("Proyecto"):
+        total = len(grp)
+        listas = grp["Estado"].astype(str).str.contains("Listo|Terminada", case=False, na=False).sum()
+        avance_rows.append({
+            "Proyecto": proy,
+            "Avance_%": round((listas / total) * 100, 1) if total else 0.0,
+            "Tareas_Listas": int(listas),
+            "Tareas_Total": int(total),
+        })
+    por_proyecto = pd.DataFrame(avance_rows).sort_values("Avance_%", ascending=False)
+    return por_estado, por_proyecto
+
+@_st_fragment
+def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
+    """Pestaña Tablero: filtros, alta y edición (rerun aislado del Gantt)."""
+    hoy = datetime.date.today()
+
+    with st.container(border=True):
+        st.markdown("#### 🔎 Filtros del tablero")
+        f_proy, f_trab, f_est, f_cnt = st.columns([2, 2, 2, 1])
+        filtro_proy = f_proy.selectbox("Proyecto", ["Todos"] + lista_proy, key="ops_filtro_proy")
+        filtro_trab = f_trab.selectbox("Trabajador", ["Todos"] + lista_trab, key="ops_filtro_trab")
+        filtro_est = f_est.selectbox("Estado", ["Todos"] + ESTADOS_TAREA_OPERACIONES, key="ops_filtro_est")
+        df_fil = filtrar_tareas_operaciones(df_base, filtro_proy, filtro_trab, filtro_est)
+        f_cnt.metric("Visibles", len(df_fil))
+
+    with st.container(border=True):
+        st.markdown("#### ➕ Nueva tarea")
+        n1, n2, n3 = st.columns([2, 1, 1])
+        nom_tarea = n1.text_input("Tarea / Actividad", placeholder="Ej: Instalación tablero principal", key="ops_new_tarea")
+        proy_tarea = n2.selectbox("Proyecto", lista_proy, key="ops_new_proy")
+        asig_tarea = n3.selectbox("Asignado a", lista_trab or ["— Sin personal —"], key="ops_new_trab")
+        p1, p2, p3, p4 = st.columns(4)
+        estado_tarea = p1.selectbox("Estado", ESTADOS_TAREA_OPERACIONES, index=0, key="ops_new_est")
+        prior_tarea = p2.selectbox("Prioridad", PRIORIDADES_TAREA, index=1, key="ops_new_pri")
+        f_ini_n = p3.date_input("Fecha inicio", value=hoy, format="DD/MM/YYYY", key="ops_new_ini")
+        f_fin_n = p4.date_input("Fecha término", value=hoy, format="DD/MM/YYYY", key="ops_new_fin")
+        if st.button("Crear tarea", type="primary", key="ops_btn_crear"):
+            if not str(nom_tarea).strip():
+                st.error("Indica el nombre de la tarea.")
+            elif not lista_trab:
+                st.error("No hay trabajadores en nómina.")
+            else:
+                fi_ok, ff_ok = f_ini_n, f_fin_n
+                if ff_ok < fi_ok:
+                    fi_ok, ff_ok = ff_ok, fi_ok
+                wd = max(1, contar_dias_habiles_rango(fi_ok, ff_ok))
+                nueva = pd.DataFrame([{
+                    "Tarea": str(nom_tarea).strip(),
+                    "Proyecto": proy_tarea,
+                    "Trabajador": asig_tarea,
+                    "Estado": estado_tarea,
+                    "Prioridad": prior_tarea,
+                    "Fecha_Inicio": fi_ok.strftime("%Y-%m-%d"),
+                    "Fecha_Termino": ff_ok.strftime("%Y-%m-%d"),
+                    "Dias_Duracion": float(wd),
+                }])
+                st.session_state.operaciones_tareas = pd.concat(
+                    [sanitizar_operaciones_tareas(st.session_state.operaciones_tareas), nueva],
+                    ignore_index=True,
+                )
+                if guardar_operaciones_tareas():
+                    if hasattr(st, "toast"):
+                        st.toast("Tarea creada y guardada.", icon="✅")
+                    st.success("Tarea registrada en Operaciones_Tareas.")
+
+    with st.container(border=True):
+        st.markdown("#### 📋 Tablero de tareas")
+        if df_fil.empty:
+            st.info("No hay tareas con estos filtros. Crea una tarea o amplía los filtros.")
+        else:
+            df_edit = df_fil.copy()
+            indices_filas = list(df_fil.index)
+            df_edit["Fecha_Inicio"] = pd.to_datetime(df_edit["Fecha_Inicio"], errors="coerce").dt.date
+            df_edit["Fecha_Termino"] = pd.to_datetime(df_edit["Fecha_Termino"], errors="coerce").dt.date
+            df_edit["Dias_Duracion"] = pd.to_numeric(df_edit["Dias_Duracion"], errors="coerce").fillna(1.0)
+
+            df_tablero = st.data_editor(
+                df_edit,
+                column_config={
+                    "Tarea": st.column_config.TextColumn("Tarea / Actividad", required=True),
+                    "Proyecto": st.column_config.SelectboxColumn("Proyecto", options=lista_proy, required=True),
+                    "Trabajador": st.column_config.SelectboxColumn("Responsable", options=lista_trab, required=True),
+                    "Prioridad": st.column_config.SelectboxColumn("Prioridad", options=PRIORIDADES_TAREA, required=True),
+                    "Estado": st.column_config.SelectboxColumn("Estado", options=ESTADOS_TAREA_OPERACIONES, required=True),
+                    "Fecha_Inicio": st.column_config.DateColumn("Inicio", format="DD/MM/YYYY"),
+                    "Fecha_Termino": st.column_config.DateColumn("Término", format="DD/MM/YYYY"),
+                    "Dias_Duracion": st.column_config.NumberColumn("Días hábiles", min_value=0.5, step=0.5, format="%.1f"),
+                },
+                hide_index=True,
+                use_container_width=True,
+                key=f"ed_ops_tareas_{st.session_state.get('ops_tareas_rev', 0)}",
+            )
+
+            if st.button("💾 Guardar tablero", type="primary", key="ops_btn_guardar_tablero"):
+                for pos, idx in enumerate(indices_filas):
+                    if pos >= len(df_tablero):
+                        break
+                    actualizada = df_tablero.iloc[pos].copy()
+                    actualizada["Fecha_Inicio"] = _fecha_tarea_a_str(actualizada["Fecha_Inicio"])
+                    actualizada["Fecha_Termino"] = _fecha_tarea_a_str(actualizada["Fecha_Termino"])
+                    actualizada["Estado"] = normalizar_estado_tarea(actualizada["Estado"])
+                    actualizada["Prioridad"] = normalizar_prioridad_tarea(actualizada["Prioridad"])
+                    st.session_state.operaciones_tareas.loc[idx] = actualizada
+                if guardar_operaciones_tareas():
+                    if hasattr(st, "toast"):
+                        st.toast("Tablero sincronizado con Google Sheets.", icon="✅")
+                    st.success("Cambios guardados en Operaciones_Tareas.")
+
+            with st.expander("🗑️ Eliminar tarea"):
+                opciones_del = [
+                    f"{row['Tarea']} — {row['Proyecto']} ({row['Trabajador']})"
+                    for _, row in df_fil.iterrows()
+                ]
+                if opciones_del:
+                    sel_del = st.selectbox("Tarea a eliminar", opciones_del, key="ops_sel_del")
+                    if st.button("Eliminar tarea seleccionada", type="primary", key="ops_btn_del"):
+                        idx_real = df_fil.index[opciones_del.index(sel_del)]
+                        st.session_state.operaciones_tareas = st.session_state.operaciones_tareas.drop(index=idx_real)
+                        if guardar_operaciones_tareas():
+                            st.success("Tarea eliminada.")
+
+@_st_fragment
+def _fragment_ops_gantt_cronograma(df_base, lista_proy, lista_trab):
+    """Pestaña Gantt: filtros y timeline Plotly a ancho completo (rerun aislado del tablero)."""
+    hoy = datetime.date.today()
+    inicio_mes = datetime.date(hoy.year, hoy.month, 1)
+    fin_mes = datetime.date(hoy.year, hoy.month, calendar.monthrange(hoy.year, hoy.month)[1])
+
+    with st.container(border=True):
+        st.markdown("#### 🔎 Filtros del cronograma")
+        g1, g2, g3 = st.columns([2, 2, 1])
+        gantt_proy = g1.selectbox("Proyecto", ["Todos"] + lista_proy, key="ops_gantt_proy")
+        gantt_trab = g2.selectbox("Trabajador", ["Todos"] + lista_trab, key="ops_gantt_trab")
+        color_gantt = g3.selectbox("Color por", ["Estado", "Proyecto"], key="ops_gantt_color")
+        fd1, fd2 = st.columns(2)
+        fecha_desde = fd1.date_input("Fecha desde", value=inicio_mes, format="DD/MM/YYYY", key="ops_gantt_desde")
+        fecha_hasta = fd2.date_input("Fecha hasta", value=fin_mes, format="DD/MM/YYYY", key="ops_gantt_hasta")
+
+    df_gantt_fil = filtrar_tareas_operaciones(df_base, gantt_proy, gantt_trab, "Todos")
+    df_gantt_fil = filtrar_tareas_rango_fechas(df_gantt_fil, fecha_desde, fecha_hasta)
+    df_gantt = preparar_datos_gantt(df_gantt_fil)
+
+    if df_gantt.empty:
+        st.info("No hay tareas en este rango de fechas. Ajusta los filtros o registra cronogramas en el tablero.")
+    else:
+        fig = figura_gantt_plotly(df_gantt, color_por=color_gantt)
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True, key="ops_gantt_chart")
+        solapes = detectar_solapes_mes(df_gantt_fil, fecha_desde.year, fecha_desde.month)
+        for aviso in solapes[:8]:
+            st.warning(aviso)
+        if len(solapes) > 8:
+            st.caption(f"+ {len(solapes) - 8} alertas de solapamiento en el periodo visible.")
+
+def _render_ops_rendimiento(df_base, lista_trab):
+    """Pestaña analítica (métricas estratégicas)."""
+    por_estado, por_proyecto = metricas_rendimiento_operaciones(df_base)
+
+    with st.container(border=True):
+        st.markdown("#### 📈 Tareas por estado")
+        if por_estado.empty:
+            st.info("Sin tareas registradas para analizar.")
+        else:
+            fig_est = px.bar(
+                por_estado,
+                x="Estado",
+                y="Cantidad",
+                color="Estado",
+                color_discrete_map=COLOR_ESTADO_OPS,
+                text="Cantidad",
+            )
+            fig_est.update_layout(showlegend=False, height=360, margin=dict(t=32, b=8))
+            fig_est.update_traces(textposition="outside")
+            st.plotly_chart(fig_est, use_container_width=True)
+
+    with st.container(border=True):
+        st.markdown("#### 🎯 % de avance por proyecto")
+        if por_proyecto.empty:
+            st.info("Sin proyectos con tareas asignadas.")
+        else:
+            fig_av = px.bar(
+                por_proyecto,
+                x="Proyecto",
+                y="Avance_%",
+                text="Avance_%",
+                color="Avance_%",
+                color_continuous_scale=["#ef4444", "#eab308", "#22c55e"],
+                range_color=[0, 100],
+            )
+            fig_av.update_layout(
+                height=380,
+                yaxis_title="Avance (%)",
+                xaxis_title="",
+                showlegend=False,
+                margin=dict(t=32, b=8),
+            )
+            fig_av.update_traces(texttemplate="%{text}%", textposition="outside")
+            st.plotly_chart(fig_av, use_container_width=True)
+            st.dataframe(
+                por_proyecto.rename(columns={
+                    "Avance_%": "Avance %",
+                    "Tareas_Listas": "Listas",
+                    "Tareas_Total": "Total tareas",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    if lista_trab:
+        with st.container(border=True):
+            st.markdown("#### 👥 Capacidad mensual del equipo")
+            render_panel_capacidad_trabajadores(df_base, lista_trab, key_suffix="ops_rend_cap")
+
+def _modulo_operaciones():
+    """Centro de mando: pestañas separadas; Gantt y tablero en fragmentos independientes."""
+    st.caption("Centro de mando operativo — sincronizado con **Operaciones_Tareas** en Google Sheets.")
+
+    lista_proy = (
+        st.session_state.proyectos_resumen["Proyecto"].tolist()
+        if not st.session_state.proyectos_resumen.empty else []
+    )
+    lista_trab = st.session_state.nomina["Trabajador"].tolist() if not st.session_state.nomina.empty else []
+
+    if not lista_proy:
+        st.warning("Crea al menos un proyecto en **Proyectos** para usar Operaciones.")
+        return
+    if not lista_trab:
+        st.info("Registra trabajadores en **Finanzas** para asignar responsables.")
+
+    df_base = sanitizar_operaciones_tareas(st.session_state.operaciones_tareas)
+    total_t = len(df_base)
+    listas = len(df_base[df_base["Estado"] == "🟢 Listo"]) if total_t else 0
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Tareas totales", total_t)
+    m2.metric("Tareas listas", listas)
+    m3.metric("Avance global", f"{int((listas / total_t) * 100) if total_t else 0}%")
+
+    tab_tablero, tab_gantt, tab_rend = st.tabs([
+        "📋 Tablero de Tareas",
+        "📅 Cronograma Gantt",
+        "📊 Rendimiento",
+    ])
+
+    with tab_tablero:
+        _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base)
+
+    with tab_gantt:
+        _fragment_ops_gantt_cronograma(df_base, lista_proy, lista_trab)
+
+    with tab_rend:
+        _render_ops_rendimiento(df_base, lista_trab)
+
+@_st_fragment
+def _fragment_modulo_bodega():
+    st.caption(
+        "Códigos por familia/partida (ej. familia **400** tornillería: **401**, **402**…). "
+        "Cantidades siempre en números enteros. El stock se calcula al registrar entradas o salidas."
+    )
+
+    tab_mov, tab_stock = st.tabs(["↔️ Entradas y Salidas", "📋 Inventario de materiales"])
+
+    with tab_mov:
+        with st.container(border=True):
+            st.markdown("#### Registrar movimiento")
+            if st.session_state.bodega_stock.empty:
+                st.warning("Primero registra materiales en la pestaña **Inventario de materiales**.")
+            else:
+                bod_rev = st.session_state.get("bod_stock_rev", 0)
+                opciones_mat, mapa_mat = opciones_material_bodega(st.session_state.bodega_stock)
+                col_tipo, col_mat = st.columns([1, 2])
+                tipo_mov = col_tipo.selectbox("Tipo de movimiento", ["Entrada", "Salida"], key="bod_tipo_mov")
+                material_sel = col_mat.selectbox(
+                    "Material (código — nombre)",
+                    opciones_mat,
+                    key=f"bod_material_sel_{bod_rev}",
+                )
+                codigo_mov = mapa_mat.get(material_sel)
+
+                if codigo_mov is not None:
+                    stock_previo = stock_actual_material(codigo_mov)
+                    if stock_previo is not None:
+                        col_mat.caption(f"Stock actual en bodega: **{stock_previo}** un.")
+
+                c1, c2, c3 = st.columns(3)
+                cant_mov = c1.number_input(
+                    "Cantidad",
+                    min_value=1,
+                    step=1,
+                    value=1,
+                    format="%d",
+                    key="bod_cant_mov",
+                )
+                fecha_mov = c2.date_input("Fecha", value=datetime.date.today(), format="DD/MM/YYYY", key="bod_fecha_mov")
+                persona_mov = c3.text_input("Persona responsable", placeholder="Quién entrega o retira", key="bod_persona_mov")
+
+                proyectos_dest = ["— Seleccione destino —"]
+                if not st.session_state.proyectos_resumen.empty:
+                    proyectos_dest += st.session_state.proyectos_resumen["Proyecto"].tolist()
+                proyectos_dest += ["Otro / Bodega general", "Mantenimiento", "Obra en terreno"]
+
+                col_d1, col_d2 = st.columns(2)
+                destino_tipo = col_d1.selectbox("Destino", proyectos_dest, key="bod_destino_sel")
+                destino_otro = col_d2.text_input(
+                    "Detalle de destino (si aplica)",
+                    placeholder="Ej: Bodega central, vehículo N°3…",
+                    key="bod_destino_txt",
+                )
+                if destino_tipo == "— Seleccione destino —":
+                    destino_final = destino_otro.strip()
+                elif destino_tipo == "Otro / Bodega general":
+                    destino_final = destino_otro.strip() or "Bodega general"
+                else:
+                    destino_final = destino_tipo if not destino_otro.strip() else f"{destino_tipo} — {destino_otro.strip()}"
+
+                if st.button("Registrar movimiento", type="primary", key="bod_btn_mov"):
+                    if not persona_mov.strip():
+                        st.error("Indica la persona responsable.")
+                    elif not destino_final:
+                        st.error("Indica el destino del material.")
+                    elif codigo_mov is None:
+                        st.error("Selecciona un material válido.")
+                    else:
+                        cant_int = int(cant_mov)
+                        if tipo_mov == "Salida" and codigo_mov is not None:
+                            stock_chk = stock_actual_material(codigo_mov)
+                            if stock_chk is not None and cant_int > stock_chk:
+                                st.error(f"Cantidad insuficiente en bodega. Stock actual: {stock_chk}")
+                            else:
+                                ok, msg, stock_res = registrar_movimiento_bodega(
+                                    codigo_mov, cant_int, tipo_mov, fecha_mov, persona_mov, destino_final
+                                )
+                                if ok:
+                                    if hasattr(st, "toast"):
+                                        st.toast(msg, icon="✅")
+                                    st.success(f"{msg} (código {codigo_mov})")
+                                    if stock_res is not None:
+                                        st.metric("Stock actualizado", f"{int(stock_res)} un.")
+                                else:
+                                    st.error(msg)
+                        else:
+                            ok, msg, stock_res = registrar_movimiento_bodega(
+                                codigo_mov, cant_int, tipo_mov, fecha_mov, persona_mov, destino_final
+                            )
+                            if ok:
+                                if hasattr(st, "toast"):
+                                    st.toast(msg, icon="✅")
+                                st.success(f"{msg} (código {codigo_mov})")
+                                if stock_res is not None:
+                                    st.metric("Stock actualizado", f"{int(stock_res)} un.")
+                            else:
+                                st.error(msg)
+
+        with st.container(border=True):
+            st.markdown("#### Histórico de movimientos")
+            hist = sanitizar_bodega_historial(st.session_state.bodega_historial)
+            if hist.empty:
+                st.info("Aún no hay entradas ni salidas registradas.")
+            else:
+                hist = hist.copy()
+                hist["_orden"] = pd.to_datetime(hist["Fecha"], errors="coerce")
+                hist = hist.sort_values("_orden", ascending=False).drop(columns=["_orden"])
+                st.dataframe(hist, use_container_width=True, hide_index=True)
+
+    with tab_stock:
+        with st.container(border=True):
+            st.markdown("#### 🔍 Buscar en inventario de materiales")
+            busqueda_bod = st.text_input(
+                "Buscar por código o nombre:",
+                placeholder="Ej: 401, tornillo, cable…",
+                key="bod_busqueda",
+            )
+            df_stock_vista = sanitizar_bodega_stock(st.session_state.bodega_stock)
+            if busqueda_bod:
+                mask_b = (
+                    df_stock_vista["Codigo"].astype(str).str.contains(busqueda_bod, case=False, na=False)
+                    | df_stock_vista["Nombre_Material"].astype(str).str.contains(busqueda_bod, case=False, na=False)
+                    | df_stock_vista["Familia"].astype(str).str.contains(busqueda_bod, case=False, na=False)
+                )
+                df_stock_vista = df_stock_vista[mask_b]
+                if df_stock_vista.empty:
+                    st.warning("Sin coincidencias en el inventario de materiales.")
+
+        with st.container(border=True):
+            with st.expander("➕ Alta en inventario de materiales", expanded=False):
+                st.caption("Familia = partida (400 tornillería). Códigos típicos: 401, 402, 403…")
+                ca, cb, cc = st.columns([1, 1, 2])
+                familia_nueva = ca.number_input("Familia (partida)", min_value=1, step=1, value=400, format="%d", key="bod_fam_nueva")
+                autogen = cb.checkbox("Autogenerar código", value=True, key="bod_autogen")
+                sugerido = sugerir_codigo_bodega(st.session_state.bodega_stock, familia_nueva)
+                if autogen:
+                    codigo_nuevo = int(sugerido)
+                    st.caption(f"Código sugerido para familia {int(familia_nueva)}: **{codigo_nuevo}**")
+                else:
+                    codigo_nuevo = cb.number_input("Código", min_value=1, step=1, value=int(sugerido), format="%d", key="bod_cod_manual")
+                nombre_nuevo = cc.text_input("Nombre del material", key="bod_nom_nuevo")
+                cd1, cd2 = st.columns(2)
+                desc_nueva = cd1.text_input("Descripción / categoría", placeholder="Ej: Tornillería", key="bod_desc_nueva")
+                stock_inicial = cd2.number_input("Stock inicial", min_value=0, step=1, value=0, format="%d", key="bod_stock_ini")
+                if st.button("Guardar material", type="primary", key="bod_btn_alta"):
+                    if not str(nombre_nuevo).strip():
+                        st.error("El nombre del material es obligatorio.")
+                    else:
+                        codigo_nuevo = int(codigo_nuevo)
+                        stock_df = sanitizar_bodega_stock(st.session_state.bodega_stock)
+                        if (stock_df["Codigo"] == codigo_nuevo).any():
+                            st.error(f"El código {codigo_nuevo} ya existe. Elige otro o activa autogenerar.")
+                        else:
+                            fila_nueva = pd.DataFrame([{
+                                "Codigo": codigo_nuevo,
+                                "Familia": int(familia_nueva),
+                                "Nombre_Material": str(nombre_nuevo).strip(),
+                                "Descripcion": str(desc_nueva).strip(),
+                                "Cantidad": int(stock_inicial),
+                                "Unidad": "un",
+                            }])
+                            st.session_state.bodega_stock = pd.concat([stock_df, fila_nueva], ignore_index=True)
+                            guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
+                            refrescar_widgets_bodega_tras_movimiento()
+                            st.success(f"Material **{codigo_nuevo}** añadido al inventario de materiales.")
+                            st.rerun()
+
+        with st.container(border=True):
+            st.markdown("#### Inventario de materiales")
+            st.caption("Datos sincronizados con la hoja **Bodega_Stock** en Google Sheets.")
+            if st.session_state.bodega_stock.empty:
+                st.info("El inventario de materiales está vacío. Usa el formulario de alta.")
+            else:
+                df_stock_edit = st.data_editor(
+                    sanitizar_bodega_stock(st.session_state.bodega_stock),
+                    column_config={
+                        "Codigo": st.column_config.NumberColumn("Código", min_value=1, step=1, format="%d"),
+                        "Familia": st.column_config.NumberColumn("Familia", min_value=1, step=1, format="%d"),
+                        "Nombre_Material": st.column_config.TextColumn("Material"),
+                        "Descripcion": st.column_config.TextColumn("Descripción"),
+                        "Cantidad": st.column_config.NumberColumn("Stock actual", min_value=0, step=1, format="%d"),
+                        "Unidad": st.column_config.TextColumn("Unidad"),
+                    },
+                    disabled=["Codigo", "Cantidad"],
+                    hide_index=True,
+                    use_container_width=True,
+                    key=f"ed_bodega_stock_{st.session_state.get('bod_stock_rev', 0)}",
+                )
+                st.caption("El **stock actual** se actualiza automáticamente al registrar entradas o salidas.")
+                if st.button("💾 Guardar inventario de materiales", type="primary", key="bod_save_stock"):
+                    st.session_state.bodega_stock = sanitizar_bodega_stock(df_stock_edit)
+                    guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
+                    limpiar_cache_streamlit()
+                    st.success("Inventario de materiales actualizado en Google Sheets (Bodega_Stock).")
+                with st.expander("🗑️ Eliminar material del inventario"):
+                    opts_del = [f"{int(r['Codigo'])} — {r['Nombre_Material']}" for _, r in df_stock_edit.iterrows()]
+                    if opts_del:
+                        sel_del = st.selectbox("Material a eliminar", opts_del, key="bod_del_mat")
+                        if st.button("Eliminar del inventario", type="primary", key="bod_btn_del_mat"):
+                            cod_del = int(sel_del.split("—")[0].strip())
+                            st.session_state.bodega_stock = sanitizar_bodega_stock(
+                                st.session_state.bodega_stock[st.session_state.bodega_stock["Codigo"] != cod_del]
+                            )
+                            guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
+                            refrescar_widgets_bodega_tras_movimiento()
+                            st.success("Material eliminado del inventario de materiales.")
+                            st.rerun()
+
+
 def _migrar_dias_duracion_tareas(df):
     df = df.copy()
     if 'Dias_Duracion' not in df.columns:
@@ -873,7 +1636,7 @@ def _migrar_dias_duracion_tareas(df):
             df.at[idx, 'Dias_Duracion'] = 1.0
     return df
 
-st.session_state.proyectos_tareas = _migrar_dias_duracion_tareas(st.session_state.proyectos_tareas)
+st.session_state.operaciones_tareas = _migrar_dias_duracion_tareas(st.session_state.operaciones_tareas)
 
 def formatear_input(llave):
     val = str(st.session_state[llave]).replace(".", "").replace(",", "").replace("$", "").replace(" ", "").strip()
@@ -1311,13 +2074,13 @@ if st.session_state.menu_actual == "Inicio":
             else:
                 for idx, row in st.session_state.proyectos_resumen.iterrows():
                     nombre_proy = row["Proyecto"]
-                    tareas_proy = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] == nombre_proy]
+                    tareas_proy = st.session_state.operaciones_tareas[st.session_state.operaciones_tareas["Proyecto"] == nombre_proy]
                     
                     if tareas_proy.empty:
                         st.write(f"**{nombre_proy}**: *Sin tareas asignadas*")
                         st.progress(0)
                     else:
-                        terminadas = len(tareas_proy[tareas_proy["Estado"].str.contains('Terminada', na=False)])
+                        terminadas = len(tareas_proy[tareas_proy["Estado"].str.contains("Listo|Terminada", na=False, case=False, regex=True)])
                         total = len(tareas_proy)
                         porcentaje = int((terminadas / total) * 100)
                         st.write(f"**{nombre_proy}**")
@@ -1328,7 +2091,9 @@ if st.session_state.menu_actual == "Inicio":
             st.markdown("#### 🚨 Alertas y Urgencias")
             
             # Tareas Urgentes
-            tareas_urgentes = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas['Estado'].isin(['🔴 Pendiente', '🟡 En proceso', 'Pendiente', 'En proceso'])]
+            tareas_urgentes = st.session_state.operaciones_tareas[
+                st.session_state.operaciones_tareas["Estado"].isin(ESTADOS_TAREA_OPERACIONES[:3])
+            ]
             if not tareas_urgentes.empty:
                 st.write("**Tareas Pendientes en Terreno:**")
                 st.dataframe(tareas_urgentes[['Proyecto', 'Tarea', 'Estado']], hide_index=True, use_container_width=True)
@@ -1583,7 +2348,7 @@ elif st.session_state.menu_actual == "Finanzas":
                             index=hoy_r.month - 1,
                             key="fin_rend_m",
                         )
-                    df_det = tabla_capacidad_personal(st.session_state.proyectos_tareas, lista_rend, yr_r, mes_r)
+                    df_det = tabla_capacidad_personal(st.session_state.operaciones_tareas, lista_rend, yr_r, mes_r)
                     st.markdown("##### Detalle por persona (mes seleccionado)")
                     st.dataframe(df_det, use_container_width=True, hide_index=True)
 
@@ -1610,7 +2375,7 @@ elif st.session_state.menu_actual == "Finanzas":
                     st.dataframe(df_ref, use_container_width=True, hide_index=True)
 
                     df_proj = tabla_proyeccion_carga_meses(
-                        st.session_state.proyectos_tareas, lista_rend, y0, m0, int(n_meses_proj)
+                        st.session_state.operaciones_tareas, lista_rend, y0, m0, int(n_meses_proj)
                     )
                     st.dataframe(df_proj, use_container_width=True, hide_index=True)
 
@@ -1756,9 +2521,9 @@ elif st.session_state.menu_actual == "Proyectos":
             oc_actual = st.session_state.proyectos_resumen.at[idx_proy, "Num_OC"]
             df_gastos_proy = st.session_state.proyectos_gastos[st.session_state.proyectos_gastos["Proyecto"] == proyecto_seleccionado].copy()
 
-            tareas_de_este_proyecto = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] == proyecto_seleccionado]
+            tareas_de_este_proyecto = st.session_state.operaciones_tareas[st.session_state.operaciones_tareas["Proyecto"] == proyecto_seleccionado]
             if not tareas_de_este_proyecto.empty:
-                terminadas = len(tareas_de_este_proyecto[tareas_de_este_proyecto["Estado"].str.contains("Terminada", na=False)])
+                terminadas = len(tareas_de_este_proyecto[tareas_de_este_proyecto["Estado"].str.contains("Listo|Terminada", na=False, case=False, regex=True)])
                 total_t = len(tareas_de_este_proyecto)
                 porc = int((terminadas / total_t) * 100)
                 st.progress(porc / 100.0, text=f"Avance Operativo del Proyecto: {porc}% ({terminadas} de {total_t} tareas)")
@@ -1767,7 +2532,7 @@ elif st.session_state.menu_actual == "Proyectos":
             with st.container(border=True):
                 st.markdown("##### 📊 Capacidad del equipo por mes")
                 lista_nom_cap = st.session_state.nomina["Trabajador"].tolist()
-                render_panel_capacidad_trabajadores(st.session_state.proyectos_tareas, lista_nom_cap, key_suffix="fin_proy")
+                render_panel_capacidad_trabajadores(st.session_state.operaciones_tareas, lista_nom_cap, key_suffix="fin_proy")
             st.write("")
 
             col_izq, col_der = st.columns([1, 2])
@@ -2015,205 +2780,24 @@ elif st.session_state.menu_actual == "Proyectos":
                         if 'proyectos_equipo' in st.session_state:
                             st.session_state.proyectos_equipo = st.session_state.proyectos_equipo[st.session_state.proyectos_equipo["Proyecto"] != proyecto_seleccionado]
                             guardar_datos("Proyectos_Equipo", st.session_state.proyectos_equipo)
-                        if 'proyectos_tareas' in st.session_state:
-                            st.session_state.proyectos_tareas = st.session_state.proyectos_tareas[st.session_state.proyectos_tareas["Proyecto"] != proyecto_seleccionado]
-                            guardar_datos("Proyectos_Tareas", st.session_state.proyectos_tareas)
+                        if 'operaciones_tareas' in st.session_state:
+                            st.session_state.operaciones_tareas = st.session_state.operaciones_tareas[st.session_state.operaciones_tareas["Proyecto"] != proyecto_seleccionado]
+                            guardar_datos("Operaciones_Tareas", st.session_state.operaciones_tareas)
+                            limpiar_cache_streamlit()
                         guardar_datos("Proyectos_Resumen", st.session_state.proyectos_resumen)
                         guardar_datos("Proyectos_Gastos", st.session_state.proyectos_gastos)
                         st.rerun()
 
 # ==========================================
-# PANTALLA 4: SEGUIMIENTO OPERATIVO (NUEVO REDISEÑO MONDAY)
+# PANTALLA 4: OPERACIONES — TABLERO MONDAY
 # ==========================================
 elif st.session_state.menu_actual == "Operaciones":
-    st.markdown("### ⏱️ Work OS: Gestión Operativa")
-    
-    proyectos_lista_seg = st.session_state.proyectos_resumen["Proyecto"].tolist()
-    if not proyectos_lista_seg:
-        with st.container(border=True):
-            st.warning("No hay proyectos creados. Ve a la pestaña 'Proyectos' para crear tu primera obra.")
-    else:
-        proyecto_seg = st.selectbox(
-            "📁 Espacio de Trabajo (Selecciona Proyecto):",
-            proyectos_lista_seg,
-            key="wos_proyecto",
-        )
-        idx_p_seg = st.session_state.proyectos_resumen[st.session_state.proyectos_resumen["Proyecto"] == proyecto_seg].index[0]
-        _fragment_wos_workspace(proyecto_seg, idx_p_seg)
+    st.markdown("### ⏱️ Operaciones — Centro de Mando")
+    _modulo_operaciones()
 
 elif st.session_state.menu_actual == "Bodega":
     st.markdown("### 🏭 Bodega — Control de Materiales")
-    st.caption(
-        "Códigos por familia/partida (ej. familia **400** tornillería: **401**, **402**…). "
-        "Cantidades siempre en números enteros."
-    )
-
-    tab_mov, tab_stock = st.tabs(["↔️ Entradas y Salidas", "📋 Maestro de Materiales"])
-
-    with tab_mov:
-        with st.container(border=True):
-            st.markdown("#### Registrar movimiento")
-            if st.session_state.bodega_stock.empty:
-                st.warning("Primero registra materiales en la pestaña **Maestro de Materiales**.")
-            else:
-                opciones_mat, mapa_mat = opciones_material_bodega(st.session_state.bodega_stock)
-                col_tipo, col_mat = st.columns([1, 2])
-                tipo_mov = col_tipo.selectbox("Tipo de movimiento", ["Entrada", "Salida"], key="bod_tipo_mov")
-                material_sel = col_mat.selectbox("Material (código — nombre)", opciones_mat, key="bod_material_sel")
-                codigo_mov = mapa_mat.get(material_sel)
-
-                c1, c2, c3 = st.columns(3)
-                cant_mov = c1.number_input(
-                    "Cantidad",
-                    min_value=1,
-                    step=1,
-                    value=1,
-                    format="%d",
-                    key="bod_cant_mov",
-                )
-                fecha_mov = c2.date_input("Fecha", value=datetime.date.today(), format="DD/MM/YYYY", key="bod_fecha_mov")
-                persona_mov = c3.text_input("Persona responsable", placeholder="Quién entrega o retira", key="bod_persona_mov")
-
-                proyectos_dest = ["— Seleccione destino —"]
-                if not st.session_state.proyectos_resumen.empty:
-                    proyectos_dest += st.session_state.proyectos_resumen["Proyecto"].tolist()
-                proyectos_dest += ["Otro / Bodega general", "Mantenimiento", "Obra en terreno"]
-
-                col_d1, col_d2 = st.columns(2)
-                destino_tipo = col_d1.selectbox("Destino", proyectos_dest, key="bod_destino_sel")
-                destino_otro = col_d2.text_input(
-                    "Detalle de destino (si aplica)",
-                    placeholder="Ej: Bodega central, vehículo N°3…",
-                    key="bod_destino_txt",
-                )
-                if destino_tipo == "— Seleccione destino —":
-                    destino_final = destino_otro.strip()
-                elif destino_tipo == "Otro / Bodega general":
-                    destino_final = destino_otro.strip() or "Bodega general"
-                else:
-                    destino_final = destino_tipo if not destino_otro.strip() else f"{destino_tipo} — {destino_otro.strip()}"
-
-                if st.button("Registrar movimiento", type="primary", key="bod_btn_mov"):
-                    if not persona_mov.strip():
-                        st.error("Indica la persona responsable.")
-                    elif not destino_final:
-                        st.error("Indica el destino del material.")
-                    elif codigo_mov is None:
-                        st.error("Selecciona un material válido.")
-                    else:
-                        ok, msg = registrar_movimiento_bodega(
-                            codigo_mov, int(cant_mov), tipo_mov, fecha_mov, persona_mov, destino_final
-                        )
-                        if ok:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-        with st.container(border=True):
-            st.markdown("#### Histórico de movimientos")
-            hist = sanitizar_bodega_historial(st.session_state.bodega_historial)
-            if hist.empty:
-                st.info("Aún no hay entradas ni salidas registradas.")
-            else:
-                hist = hist.copy()
-                hist["_orden"] = pd.to_datetime(hist["Fecha"], errors="coerce")
-                hist = hist.sort_values("_orden", ascending=False).drop(columns=["_orden"])
-                st.dataframe(hist, use_container_width=True, hide_index=True)
-
-    with tab_stock:
-        with st.container(border=True):
-            st.markdown("#### 🔍 Buscar en stock")
-            busqueda_bod = st.text_input(
-                "Buscar por código o nombre:",
-                placeholder="Ej: 401, tornillo, cable…",
-                key="bod_busqueda",
-            )
-            df_stock_vista = sanitizar_bodega_stock(st.session_state.bodega_stock)
-            if busqueda_bod:
-                mask_b = (
-                    df_stock_vista["Codigo"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                    | df_stock_vista["Nombre_Material"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                    | df_stock_vista["Familia"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                )
-                df_stock_vista = df_stock_vista[mask_b]
-                if df_stock_vista.empty:
-                    st.warning("Sin coincidencias en el maestro de materiales.")
-
-        with st.container(border=True):
-            with st.expander("➕ Alta de material en stock", expanded=False):
-                st.caption("Familia = partida (400 tornillería). Códigos típicos: 401, 402, 403…")
-                ca, cb, cc = st.columns([1, 1, 2])
-                familia_nueva = ca.number_input("Familia (partida)", min_value=1, step=1, value=400, format="%d", key="bod_fam_nueva")
-                autogen = cb.checkbox("Autogenerar código", value=True, key="bod_autogen")
-                sugerido = sugerir_codigo_bodega(st.session_state.bodega_stock, familia_nueva)
-                if autogen:
-                    codigo_nuevo = int(sugerido)
-                    st.caption(f"Código sugerido para familia {int(familia_nueva)}: **{codigo_nuevo}**")
-                else:
-                    codigo_nuevo = cb.number_input("Código", min_value=1, step=1, value=int(sugerido), format="%d", key="bod_cod_manual")
-                nombre_nuevo = cc.text_input("Nombre del material", key="bod_nom_nuevo")
-                cd1, cd2 = st.columns(2)
-                desc_nueva = cd1.text_input("Descripción / categoría", placeholder="Ej: Tornillería", key="bod_desc_nueva")
-                stock_inicial = cd2.number_input("Stock inicial", min_value=0, step=1, value=0, format="%d", key="bod_stock_ini")
-                if st.button("Guardar material", type="primary", key="bod_btn_alta"):
-                    if not str(nombre_nuevo).strip():
-                        st.error("El nombre del material es obligatorio.")
-                    else:
-                        codigo_nuevo = int(codigo_nuevo)
-                        stock_df = sanitizar_bodega_stock(st.session_state.bodega_stock)
-                        if (stock_df["Codigo"] == codigo_nuevo).any():
-                            st.error(f"El código {codigo_nuevo} ya existe. Elige otro o activa autogenerar.")
-                        else:
-                            fila_nueva = pd.DataFrame([{
-                                "Codigo": codigo_nuevo,
-                                "Familia": int(familia_nueva),
-                                "Nombre_Material": str(nombre_nuevo).strip(),
-                                "Descripcion": str(desc_nueva).strip(),
-                                "Cantidad": int(stock_inicial),
-                                "Unidad": "un",
-                            }])
-                            st.session_state.bodega_stock = pd.concat([stock_df, fila_nueva], ignore_index=True)
-                            guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
-                            st.success(f"Material **{codigo_nuevo}** registrado.")
-                            st.rerun()
-
-        with st.container(border=True):
-            st.markdown("#### Maestro de materiales (Bodega_Stock)")
-            if st.session_state.bodega_stock.empty:
-                st.info("No hay materiales en stock. Usa el formulario de alta.")
-            else:
-                df_stock_edit = st.data_editor(
-                    sanitizar_bodega_stock(st.session_state.bodega_stock),
-                    column_config={
-                        "Codigo": st.column_config.NumberColumn("Código", min_value=1, step=1, format="%d"),
-                        "Familia": st.column_config.NumberColumn("Familia", min_value=1, step=1, format="%d"),
-                        "Nombre_Material": st.column_config.TextColumn("Material"),
-                        "Descripcion": st.column_config.TextColumn("Descripción"),
-                        "Cantidad": st.column_config.NumberColumn("Stock actual", min_value=0, step=1, format="%d"),
-                        "Unidad": st.column_config.TextColumn("Unidad"),
-                    },
-                    disabled=["Codigo"],
-                    hide_index=True,
-                    use_container_width=True,
-                    key="ed_bodega_stock",
-                )
-                if st.button("💾 Guardar maestro de materiales", type="primary", key="bod_save_stock"):
-                    st.session_state.bodega_stock = sanitizar_bodega_stock(df_stock_edit)
-                    guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
-                    st.success("Maestro actualizado en Google Sheets (Bodega_Stock).")
-                with st.expander("🗑️ Eliminar material del maestro"):
-                    opts_del = [f"{int(r['Codigo'])} — {r['Nombre_Material']}" for _, r in df_stock_edit.iterrows()]
-                    if opts_del:
-                        sel_del = st.selectbox("Material a eliminar", opts_del, key="bod_del_mat")
-                        if st.button("Eliminar del maestro", type="primary", key="bod_btn_del_mat"):
-                            cod_del = int(sel_del.split("—")[0].strip())
-                            st.session_state.bodega_stock = sanitizar_bodega_stock(
-                                st.session_state.bodega_stock[st.session_state.bodega_stock["Codigo"] != cod_del]
-                            )
-                            guardar_datos("Bodega_Stock", st.session_state.bodega_stock)
-                            st.success("Material eliminado del maestro.")
-                            st.rerun()
+    _fragment_modulo_bodega()
 
 # ==========================================
 # PANTALLA 6: BALANCE TOTAL
