@@ -5,3 +5,5 @@ google-auth
 fpdf
 altair
 plotly
+sqlalchemy
+psycopg2-binary
