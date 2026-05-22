@@ -31,6 +31,47 @@ CREATE TABLE IF NOT EXISTS bodega_inventario (
 CREATE INDEX IF NOT EXISTS idx_bodega_codigo ON bodega_inventario (codigo);
 CREATE INDEX IF NOT EXISTS idx_bodega_tipo_mov ON bodega_inventario (tipo_movimiento);
 
+CREATE TABLE IF NOT EXISTS proyectos (
+    id SERIAL PRIMARY KEY,
+    nombre TEXT NOT NULL UNIQUE,
+    empresa TEXT DEFAULT '',
+    ciudad TEXT DEFAULT '',
+    num_oc TEXT DEFAULT '',
+    cobro INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS proyecto_equipo (
+    id SERIAL PRIMARY KEY,
+    proyecto TEXT NOT NULL,
+    trabajador TEXT NOT NULL,
+    cargo_proyecto TEXT DEFAULT '',
+    horas_asignadas DOUBLE PRECISION DEFAULT 0,
+    costo_hora_estimado DOUBLE PRECISION DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_proyecto_equipo_proyecto ON proyecto_equipo (proyecto);
+
+CREATE TABLE IF NOT EXISTS proyecto_gastos (
+    id SERIAL PRIMARY KEY,
+    proyecto TEXT NOT NULL,
+    item TEXT DEFAULT '',
+    categoria TEXT DEFAULT 'Otros',
+    monto INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_proyecto_gastos_proyecto ON proyecto_gastos (proyecto);
+
+CREATE TABLE IF NOT EXISTS proyecto_presupuesto (
+    id SERIAL PRIMARY KEY,
+    proyecto TEXT NOT NULL,
+    concepto TEXT DEFAULT '',
+    cantidad DOUBLE PRECISION DEFAULT 1,
+    precio_unitario INTEGER DEFAULT 0,
+    monto INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_proyecto_presupuesto_proyecto ON proyecto_presupuesto (proyecto);
+
 CREATE TABLE IF NOT EXISTS asistencia_nomina (
     id SERIAL PRIMARY KEY,
     rut TEXT NOT NULL UNIQUE,
