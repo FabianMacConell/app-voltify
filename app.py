@@ -173,7 +173,7 @@ def _params_operacion_tarea(row):
     else:
         dias_val = float(dias)
     return {
-        "tarea": str(row["tarea"]).strip(),
+        "tarea": normalizar_texto_manual(row["tarea"], "oracion"),
         "proyecto": str(row["proyecto"]).strip(),
         "trabajador": str(row["trabajador"]).strip(),
         "estado": str(row["estado"]).strip(),
@@ -375,8 +375,8 @@ def insertar_material_bodega_sql(
     try:
         codigo = int(codigo)
         familia = int(familia)
-        nombre_material = str(nombre_material).strip()
-        descripcion = str(descripcion).strip()
+        nombre_material = normalizar_texto_manual(nombre_material, "titulo")
+        descripcion = normalizar_texto_manual(descripcion, "oracion")
         cantidad = int(cantidad)
         unidad = str(unidad or "un")
         with conn.session as session:
@@ -461,8 +461,8 @@ def actualizar_metadatos_stock_sql(codigo, familia, nombre, descripcion, unidad)
             {
                 "codigo": int(codigo),
                 "familia": int(familia),
-                "nombre_material": str(nombre).strip(),
-                "descripcion": str(descripcion).strip(),
+                "nombre_material": normalizar_texto_manual(nombre, "titulo"),
+                "descripcion": normalizar_texto_manual(descripcion, "oracion"),
                 "unidad": str(unidad or "un"),
             },
         )
@@ -728,12 +728,12 @@ def cargar_proyectos_sql(ttl=0):
 def insertar_proyecto_sql(nombre, empresa, ciudad, num_oc, refrescar_ui=True):
     """Inserta proyecto (cobro = 0; se define al final en Cierre Económico)."""
     try:
-        nombre_var = str(nombre).strip()
+        nombre_var = normalizar_texto_manual(nombre, "titulo")
         if not nombre_var:
             st.error("El nombre del proyecto es obligatorio.")
             return False
-        empresa_var = str(empresa or "").strip()
-        ciudad_var = str(ciudad or "").strip() or "No especificada"
+        empresa_var = normalizar_texto_manual(empresa or "", "titulo")
+        ciudad_var = normalizar_texto_manual(ciudad or "", "titulo") or "No especificada"
         num_oc_var = str(num_oc or "").strip() or "Pendiente"
         with conn.session as session:
             session.execute(
@@ -831,7 +831,7 @@ def insertar_proyecto_equipo_sql(proyecto, trabajador, cargo_proyecto, horas_asi
         params = {
             "proyecto": str(proyecto).strip(),
             "trabajador": str(trabajador).strip(),
-            "cargo_proyecto": str(cargo_proyecto).strip(),
+            "cargo_proyecto": normalizar_texto_manual(cargo_proyecto, "titulo"),
             "horas_asignadas": float(horas_asignadas),
             "costo_hora_estimado": float(costo_hora_estimado),
         }
@@ -912,7 +912,7 @@ def insertar_proyecto_gasto_sql(proyecto, item, categoria, monto, refrescar_ui=T
             cat = "Otros"
         params = {
             "proyecto": str(proyecto).strip(),
-            "item": str(item).strip(),
+            "item": normalizar_texto_manual(item, "oracion"),
             "categoria": cat,
             "monto": int(round(a_numerico_clp(monto))),
         }
@@ -995,7 +995,7 @@ def insertar_proyecto_presupuesto_linea_sql(
         monto_linea = int(round(cant * precio))
         params = {
             "proyecto": str(proyecto).strip(),
-            "concepto": str(concepto).strip(),
+            "concepto": normalizar_texto_manual(concepto, "oracion"),
             "cantidad": cant,
             "precio_unitario": precio,
             "monto": monto_linea,
@@ -1180,10 +1180,11 @@ def cargar_nomina_sql(ttl=0):
 
 def _params_nomina_row(row):
     """Mapea una fila (formulario / data_editor) al diccionario de parámetros SQL."""
+    rut_raw = str(row["rut"]).strip()
     return {
-        "rut": str(row["rut"]).strip(),
-        "trabajador": str(row["trabajador"]).strip(),
-        "cargo": str(row.get("cargo", "")),
+        "rut": formatear_rut(rut_raw) if rut_raw else "",
+        "trabajador": normalizar_texto_manual(row["trabajador"], "titulo"),
+        "cargo": normalizar_texto_manual(row.get("cargo", ""), "titulo"),
         "sueldo_base": int(round(a_numerico_clp(row.get("sueldo_base", 0)))),
         "jornada_hrs": int(round(a_numerico_clp(row.get("jornada_hrs", 44)))),
         "tipo_contrato": str(row.get("tipo_contrato", "Indefinido")),
@@ -1221,7 +1222,8 @@ def _upsert_fila_nomina_en_sesion(session, row, rut_anterior=None):
     p = _params_nomina_row(row)
     if not p["rut"] or not p["trabajador"]:
         raise ValueError("RUT y trabajador son obligatorios para guardar en asistencia_nomina.")
-    rut_where = str(rut_anterior).strip() if rut_anterior else p["rut"]
+    rut_prev = str(rut_anterior).strip() if rut_anterior else ""
+    rut_where = formatear_rut(rut_prev) if rut_prev else p["rut"]
     params_sql = _dict_params_nomina_sql(p)
     res = session.execute(
         text("""
@@ -1292,7 +1294,7 @@ def sincronizar_nomina_sql(df, mensaje_flash=None, refrescar=True):
         with conn.session as session:
             for _, row in df.iterrows():
                 _upsert_fila_nomina_en_sesion(session, row)
-                ruts_vivos.append(str(row["rut"]).strip())
+                ruts_vivos.append(formatear_rut(row["rut"]))
             if ruts_vivos:
                 stmt = text(
                     "DELETE FROM asistencia_nomina WHERE rut NOT IN :ruts"
@@ -1317,7 +1319,7 @@ def eliminar_trabajador_nomina_sql(rut, refrescar_ui=True):
         with conn.session as session:
             session.execute(
                 text("DELETE FROM asistencia_nomina WHERE rut = :rut"),
-                {"rut": str(rut).strip()},
+                {"rut": formatear_rut(rut)},
             )
             session.commit()
         if refrescar_ui:
@@ -1545,9 +1547,83 @@ TASAS_AFP = {
     "Uno (10.69%)": 0.1069
 }
 
-def formato_clp(valor):
-    try: return f"${int(valor):,.0f}".replace(",", ".")
-    except (ValueError, TypeError): return "$0"
+def formatear_clp(valor):
+    try:
+        return f"${int(valor):,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return "$0"
+
+formato_clp = formatear_clp
+
+def formatear_rut(rut_sucio):
+    rut = "".join(c for c in str(rut_sucio) if c.isalnum()).upper()
+    if not rut:
+        return ""
+    cuerpo = rut[:-1]
+    dv = rut[-1]
+    if len(cuerpo) > 0:
+        try:
+            cuerpo_formateado = f"{int(cuerpo):,}".replace(",", ".")
+            return f"{cuerpo_formateado}-{dv}"
+        except ValueError:
+            return rut
+    return rut
+
+def normalizar_texto_manual(valor, estilo="oracion"):
+    """Normaliza texto ingresado a mano antes de guardar (formato oración)."""
+    return cosmetic_oracion(valor)
+
+def cosmetic_oracion(valor):
+    """Maquillaje UI: primera letra mayúscula (sin tocar datos en SQL)."""
+    s = str(valor or "").strip()
+    if not s:
+        return s
+    return s.capitalize()
+
+def etiqueta_ui(texto):
+    """Label de widget Streamlit con inicial mayúscula."""
+    s = str(texto or "").strip()
+    if not s:
+        return s
+    return s[0].upper() + s[1:] if len(s) > 1 else s.upper()
+
+_COLUMNAS_EXCLUIR_MAQUILLAJE = frozenset({
+    "estado", "prioridad", "rut", "codigo", "id", "afp", "tipo_contrato",
+    "gratificacion", "aprobacion", "orden_compra", "estado_comercial", "tipo",
+    "num_oc", "referencia", "tipo_movimiento", "unidad", "contrato", "nombre_afp",
+})
+
+def df_maquillaje_visual(df, columnas=None, excluir=None):
+    """Copia cosmética para st.dataframe / st.data_editor (no modifica el DF original)."""
+    if df is None or getattr(df, "empty", True):
+        return df
+    out = df.copy()
+    excl = _COLUMNAS_EXCLUIR_MAQUILLAJE | frozenset(excluir or ())
+    if columnas is not None:
+        cols = [c for c in columnas if c in out.columns]
+    else:
+        cols = [
+            c for c in out.columns
+            if str(c).lower() not in excl
+            and (out[c].dtype == object or str(out[c].dtype) == "string")
+        ]
+    def _cap_celda(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return v
+        s = str(v).strip()
+        if not s or s.lower() in ("nan", "none"):
+            return v
+        return s.capitalize()
+
+    for c in cols:
+        out[c] = out[c].apply(_cap_celda)
+    return out
+
+def mostrar_tabla(df, **kwargs):
+    st.dataframe(df_maquillaje_visual(df), **kwargs)
+
+def mostrar_editor(df, **kwargs):
+    return st.data_editor(df_maquillaje_visual(df), **kwargs)
 
 def a_numerico_clp(valor, default=0.0):
     """Convierte montos desde número, texto CLP o celdas corruptas a float."""
@@ -1595,6 +1671,22 @@ def sanitizar_nomina(df):
             out[col] = out[col].apply(
                 lambda v: str(v).strip() if pd.notna(v) else v
             )
+    if "rut" in out.columns:
+        out["rut"] = out["rut"].apply(
+            lambda v: (
+                formatear_rut(v)
+                if str(v).strip() and str(v).strip().lower() not in ("sin registro", "nan")
+                else str(v).strip()
+            )
+        )
+    if "trabajador" in out.columns:
+        out["trabajador"] = out["trabajador"].apply(
+            lambda v: normalizar_texto_manual(v, "titulo") if pd.notna(v) and str(v).strip() else v
+        )
+    if "cargo" in out.columns:
+        out["cargo"] = out["cargo"].apply(
+            lambda v: normalizar_texto_manual(v, "titulo") if pd.notna(v) and str(v).strip() else v
+        )
     return out
 
 if 'nomina_rev' not in st.session_state:
@@ -1869,6 +1961,8 @@ def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, dest
         return False, f"Cantidad insuficiente en bodega. Stock actual: {stock_actual}", stock_actual
 
     fecha_str = fecha.strftime("%Y-%m-%d") if hasattr(fecha, "strftime") else str(fecha)
+    persona_norm = normalizar_texto_manual(persona, "titulo")
+    destino_norm = str(destino).strip()
 
     try:
         _registrar_movimiento_bodega_transaccion(
@@ -1877,8 +1971,8 @@ def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, dest
             codigo=codigo,
             nombre_material=nombre_material,
             cantidad_digitada=cantidad_digitada,
-            persona_responsable=persona,
-            destino=destino,
+            persona_responsable=persona_norm,
+            destino=destino_norm,
             nuevo_stock=nuevo_stock,
         )
         recargar_bodega_desde_sql()
@@ -1917,7 +2011,7 @@ def df_formateado_clp(df: pd.DataFrame, columnas_monto: list[str]) -> pd.DataFra
     out = df.copy()
     for c in columnas_monto:
         if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0).apply(formato_clp)
+            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0).apply(formatear_clp)
     return out
 
 # --- Capacidad mensual de trabajadores (días hábiles) ---
@@ -2168,16 +2262,11 @@ def render_panel_capacidad_trabajadores(df_tareas, lista_trabajadores, key_suffi
             index=hoy.month - 1,
             key=f"cap_m_{key_suffix}",
         )
-    cap_mes = dias_habiles_en_mes(y, m)
-    st.caption(
-        f"Mes de referencia: **{meses_nombres[m - 1]} {y}** — tope **{cap_mes}** días hábiles. "
-        "Los **días asignados** suman tareas **pendientes y en proceso** en todos los proyectos (reparto por fechas)."
-    )
     if not lista_trabajadores:
         st.info("No hay trabajadores en nómina para mostrar capacidad.")
         return
     df_tab = tabla_capacidad_personal(df_tareas, lista_trabajadores, y, m)
-    st.dataframe(df_tab, width="stretch", hide_index=True)
+    mostrar_tabla(df_tab, width="stretch", hide_index=True)
 
 def _wos_cambiar_estado_tarea(idx, nuevo_estado, mensaje="Estado actualizado"):
     st.session_state.operaciones_tareas.at[idx, "estado"] = normalizar_estado_tarea(nuevo_estado)
@@ -2217,7 +2306,7 @@ def _render_wos_tablero(proyecto_seg):
         if st.button("Crear Tarea", width="stretch", key=f"wos_btn_new_{proyecto_seg}"):
             if desc_tarea:
                 nueva_tarea = pd.DataFrame([{
-                    "tarea": desc_tarea,
+                    "tarea": cosmetic_oracion(desc_tarea),
                     "proyecto": proyecto_seg,
                     "trabajador": encargado_tarea,
                     "estado": "⚪ Pendiente",
@@ -2267,10 +2356,10 @@ def _render_wos_tablero(proyecto_seg):
             st.markdown("<h4 style='text-align: center; color: #94a3b8;'>⚪ Pendiente</h4>", unsafe_allow_html=True)
             for idx, row in df_vista_filtrada[df_vista_filtrada["estado"] == "⚪ Pendiente"].iterrows():
                 with st.container(border=True):
-                    st.markdown(f"**{row['tarea']}**")
-                    cargo_w = str(row.get("cargo", "") or "").strip()
+                    st.markdown(f"**{cosmetic_oracion(row['tarea'])}**")
+                    cargo_w = cosmetic_oracion(str(row.get("cargo", "") or ""))
                     cap_extra = f" · {cargo_w}" if cargo_w else ""
-                    st.caption(f"👤 {row['trabajador']}{cap_extra} | 📅 {row['fecha_termino']}")
+                    st.caption(f"👤 {cosmetic_oracion(row['trabajador'])}{cap_extra} | 📅 {row['fecha_termino']}")
                     if st.button("▶️ Iniciar", key=f"start_{proyecto_seg}_{idx}", width="stretch"):
                         _wos_cambiar_estado_tarea(idx, "🟡 En Proceso", "Tarea en proceso")
 
@@ -2278,10 +2367,10 @@ def _render_wos_tablero(proyecto_seg):
             st.markdown("<h4 style='text-align: center; color: #eab308;'>🟡 En Proceso</h4>", unsafe_allow_html=True)
             for idx, row in df_vista_filtrada[df_vista_filtrada["estado"] == "🟡 En Proceso"].iterrows():
                 with st.container(border=True):
-                    st.markdown(f"**{row['tarea']}**")
-                    cargo_w = str(row.get("cargo", "") or "").strip()
+                    st.markdown(f"**{cosmetic_oracion(row['tarea'])}**")
+                    cargo_w = cosmetic_oracion(str(row.get("cargo", "") or ""))
                     cap_extra = f" · {cargo_w}" if cargo_w else ""
-                    st.caption(f"👤 {row['trabajador']}{cap_extra} | 📅 {row['fecha_termino']}")
+                    st.caption(f"👤 {cosmetic_oracion(row['trabajador'])}{cap_extra} | 📅 {row['fecha_termino']}")
                     c1, c2 = st.columns(2)
                     if c1.button("⏸️ Estancar", key=f"pause_{proyecto_seg}_{idx}", width="stretch"):
                         _wos_cambiar_estado_tarea(idx, "🔴 Estancado", "Tarea estancada")
@@ -2292,10 +2381,10 @@ def _render_wos_tablero(proyecto_seg):
             st.markdown("<h4 style='text-align: center; color: #ef4444;'>🔴 Estancado</h4>", unsafe_allow_html=True)
             for idx, row in df_vista_filtrada[df_vista_filtrada["estado"] == "🔴 Estancado"].iterrows():
                 with st.container(border=True):
-                    st.markdown(f"**{row['tarea']}**")
-                    cargo_w = str(row.get("cargo", "") or "").strip()
+                    st.markdown(f"**{cosmetic_oracion(row['tarea'])}**")
+                    cargo_w = cosmetic_oracion(str(row.get("cargo", "") or ""))
                     cap_extra = f" · {cargo_w}" if cargo_w else ""
-                    st.caption(f"👤 {row['trabajador']}{cap_extra} | 📅 {row['fecha_termino']}")
+                    st.caption(f"👤 {cosmetic_oracion(row['trabajador'])}{cap_extra} | 📅 {row['fecha_termino']}")
                     if st.button("▶️ Reanudar", key=f"resume_{proyecto_seg}_{idx}", width="stretch"):
                         _wos_cambiar_estado_tarea(idx, "🟡 En Proceso", "Tarea reanudada")
 
@@ -2303,10 +2392,10 @@ def _render_wos_tablero(proyecto_seg):
             st.markdown("<h4 style='text-align: center; color: #22c55e;'>🟢 Listo</h4>", unsafe_allow_html=True)
             for idx, row in df_vista_filtrada[df_vista_filtrada["estado"] == "🟢 Listo"].iterrows():
                 with st.container(border=True):
-                    st.markdown(f"**{row['tarea']}**")
-                    cargo_w = str(row.get("cargo", "") or "").strip()
+                    st.markdown(f"**{cosmetic_oracion(row['tarea'])}**")
+                    cargo_w = cosmetic_oracion(str(row.get("cargo", "") or ""))
                     cap_extra = f" · {cargo_w}" if cargo_w else ""
-                    st.caption(f"👤 {row['trabajador']}{cap_extra} | 📅 {row['fecha_termino']}")
+                    st.caption(f"👤 {cosmetic_oracion(row['trabajador'])}{cap_extra} | 📅 {row['fecha_termino']}")
                     if st.button("↩️ Reabrir", key=f"revert_{proyecto_seg}_{idx}", width="stretch"):
                         _wos_cambiar_estado_tarea(idx, "🟡 En Proceso", "Tarea reabierta")
     else:
@@ -2317,11 +2406,14 @@ def _render_wos_tablero(proyecto_seg):
             df_vista_filtrada["dias_duracion"] = 1.0
         df_vista_filtrada["dias_duracion"] = pd.to_numeric(df_vista_filtrada["dias_duracion"], errors="coerce").fillna(1.0)
 
-        df_tareas_editadas = st.data_editor(
+        df_tareas_editadas = mostrar_editor(
             df_vista_filtrada,
             column_config={
-                "estado": st.column_config.SelectboxColumn("estado", options=ESTADOS_TAREA_OPERACIONES),
-                "prioridad": st.column_config.SelectboxColumn("prioridad", options=PRIORIDADES_TAREA),
+                "tarea": st.column_config.TextColumn("Tarea"),
+                "proyecto": st.column_config.TextColumn("Proyecto"),
+                "trabajador": st.column_config.TextColumn("Trabajador"),
+                "estado": st.column_config.SelectboxColumn("Estado", options=ESTADOS_TAREA_OPERACIONES),
+                "prioridad": st.column_config.SelectboxColumn("Prioridad", options=PRIORIDADES_TAREA),
                 "fecha_inicio": st.column_config.DateColumn("Inicio"),
                 "fecha_termino": st.column_config.DateColumn("Fin"),
                 "dias_duracion": st.column_config.NumberColumn("Días duración (háb.)", min_value=0.5, step=0.5, format="%.1f"),
@@ -2398,8 +2490,7 @@ def _render_wos_equipo(proyecto_seg):
     mask_eq = st.session_state.proyectos_equipo["Proyecto"] == proyecto_seg
     df_eq_editar = st.session_state.proyectos_equipo[mask_eq]
 
-    st.caption("Asigna los roles del equipo en terreno:")
-    df_eq_mod = st.data_editor(
+    df_eq_mod = mostrar_editor(
         df_eq_editar,
         column_config={
             "Rol_Proyecto": st.column_config.SelectboxColumn(
@@ -2719,9 +2810,9 @@ def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
     with st.container(border=True):
         st.markdown("#### 🔎 Filtros del tablero")
         f_proy, f_trab, f_est, f_cnt = st.columns([2, 2, 2, 1])
-        filtro_proy = f_proy.selectbox("proyecto", ["Todos"] + lista_proy, key="ops_filtro_proy")
-        filtro_trab = f_trab.selectbox("trabajador", ["Todos"] + lista_trab, key="ops_filtro_trab")
-        filtro_est = f_est.selectbox("estado", ["Todos"] + ESTADOS_TAREA_OPERACIONES, key="ops_filtro_est")
+        filtro_proy = f_proy.selectbox("Proyecto", ["Todos"] + lista_proy, key="ops_filtro_proy")
+        filtro_trab = f_trab.selectbox("Trabajador", ["Todos"] + lista_trab, key="ops_filtro_trab")
+        filtro_est = f_est.selectbox("Estado", ["Todos"] + ESTADOS_TAREA_OPERACIONES, key="ops_filtro_est")
         df_fil = filtrar_tareas_operaciones(df_base, filtro_proy, filtro_trab, filtro_est)
         f_cnt.metric("Visibles", len(df_fil))
 
@@ -2729,11 +2820,11 @@ def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
         st.markdown("#### ➕ Nueva tarea")
         n1, n2, n3 = st.columns([2, 1, 1])
         nom_tarea = n1.text_input("Tarea / Actividad", placeholder="Ej: Instalación tablero principal", key="ops_new_tarea")
-        proy_tarea = n2.selectbox("proyecto", lista_proy, key="ops_new_proy")
+        proy_tarea = n2.selectbox("Proyecto", lista_proy, key="ops_new_proy")
         asig_tarea = n3.selectbox("Asignado a", lista_trab or ["— Sin personal —"], key="ops_new_trab")
         p1, p2, p3, p4 = st.columns(4)
-        estado_tarea = p1.selectbox("estado", ESTADOS_TAREA_OPERACIONES, index=0, key="ops_new_est")
-        prior_tarea = p2.selectbox("prioridad", PRIORIDADES_TAREA, index=1, key="ops_new_pri")
+        estado_tarea = p1.selectbox("Estado", ESTADOS_TAREA_OPERACIONES, index=0, key="ops_new_est")
+        prior_tarea = p2.selectbox("Prioridad", PRIORIDADES_TAREA, index=1, key="ops_new_pri")
         f_ini_n = p3.date_input("Fecha inicio", value=hoy, format="DD/MM/YYYY", key="ops_new_ini")
         f_fin_n = p4.date_input("Fecha término", value=hoy, format="DD/MM/YYYY", key="ops_new_fin")
         if st.button("Crear tarea", type="primary", key="ops_btn_crear"):
@@ -2747,7 +2838,7 @@ def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
                     fi_ok, ff_ok = ff_ok, fi_ok
                 wd = max(1, contar_dias_habiles_rango(fi_ok, ff_ok))
                 nueva = pd.DataFrame([{
-                    "tarea": str(nom_tarea).strip(),
+                    "tarea": cosmetic_oracion(nom_tarea),
                     "proyecto": proy_tarea,
                     "trabajador": asig_tarea,
                     "estado": estado_tarea,
@@ -2764,10 +2855,6 @@ def _fragment_ops_tablero_tareas(lista_proy, lista_trab, df_base):
 
     with st.container(border=True):
         st.markdown("#### 📋 Tablero de tareas")
-        st.caption(
-            "Vista en cartas — edita estado y fechas en cada tarjeta. "
-            "Los cambios se guardan en **operaciones_tareas** (Supabase) y se reflejan en el Gantt."
-        )
         if df_fil.empty:
             st.info("No hay tareas con estos filtros. Crea una tarea o amplía los filtros.")
         else:
@@ -2783,9 +2870,14 @@ def _fragment_ops_gantt_cronograma(df_base, lista_proy, lista_trab):
     with st.container(border=True):
         st.markdown("#### 🔎 Filtros del cronograma")
         g1, g2, g3 = st.columns([2, 2, 1])
-        gantt_proy = g1.selectbox("proyecto", ["Todos"] + lista_proy, key="ops_gantt_proy")
-        gantt_trab = g2.selectbox("trabajador", ["Todos"] + lista_trab, key="ops_gantt_trab")
-        color_gantt = g3.selectbox("Color por", ["estado", "proyecto"], key="ops_gantt_color")
+        gantt_proy = g1.selectbox("Proyecto", ["Todos"] + lista_proy, key="ops_gantt_proy")
+        gantt_trab = g2.selectbox("Trabajador", ["Todos"] + lista_trab, key="ops_gantt_trab")
+        color_gantt = g3.selectbox(
+            "Color por",
+            ["estado", "proyecto"],
+            format_func=lambda x: etiqueta_ui(x),
+            key="ops_gantt_color",
+        )
         fd1, fd2 = st.columns(2)
         fecha_desde = fd1.date_input("Fecha desde", value=inicio_mes, format="DD/MM/YYYY", key="ops_gantt_desde")
         fecha_hasta = fd2.date_input("Fecha hasta", value=fin_mes, format="DD/MM/YYYY", key="ops_gantt_hasta")
@@ -2850,7 +2942,7 @@ def _render_ops_rendimiento(df_base, lista_trab):
             )
             fig_av.update_traces(texttemplate="%{text}%", textposition="outside")
             st.plotly_chart(fig_av, width="stretch")
-            st.dataframe(
+            mostrar_tabla(
                 por_proyecto.rename(columns={
                     "Avance_%": "Avance %",
                     "Tareas_Listas": "Listas",
@@ -2867,8 +2959,6 @@ def _render_ops_rendimiento(df_base, lista_trab):
 
 def _modulo_operaciones():
     """Centro de mando: pestañas separadas; Gantt y tablero en fragmentos independientes."""
-    st.caption("Centro de mando operativo — sincronizado con **operaciones_tareas** en Supabase SQL.")
-
     df_proyectos_ops = sanitizar_proyectos_df(cargar_proyectos_sql(ttl=0))
     lista_proy = df_proyectos_ops["nombre"].astype(str).tolist() if not df_proyectos_ops.empty else []
     if not lista_proy and not st.session_state.proyectos_resumen.empty:
@@ -2907,10 +2997,6 @@ def _modulo_operaciones():
 
 @_st_fragment
 def _fragment_modulo_bodega():
-    st.caption(
-        "Códigos por familia/partida (ej. familia **400** tornillería: **401**, **402**…). "
-        "Cantidades siempre en números enteros. Persistencia en **bodega_inventario** (Supabase SQL)."
-    )
     df_stock_sql, df_hist_sql = cargar_bodega_inventario_sql(ttl=0)
     st.session_state.bodega_stock = df_stock_sql
     st.session_state.bodega_historial = df_hist_sql
@@ -2944,14 +3030,14 @@ def _fragment_modulo_bodega():
 
                     c1, c2, c3 = st.columns(3)
                     cant_mov = c1.number_input(
-                        "cantidad",
+                        "Cantidad",
                         min_value=1,
                         step=1,
                         value=1,
                         format="%d",
                         key="bod_cant_mov",
                     )
-                    fecha_mov = c2.date_input("fecha", value=datetime.date.today(), format="DD/MM/YYYY", key="bod_fecha_mov")
+                    fecha_mov = c2.date_input("Fecha", value=datetime.date.today(), format="DD/MM/YYYY", key="bod_fecha_mov")
                     persona_mov = c3.text_input("Persona responsable", placeholder="Quién entrega o retira", key="bod_persona_mov")
 
                     proyectos_dest = ["— Seleccione destino —"]
@@ -2960,21 +3046,23 @@ def _fragment_modulo_bodega():
                     proyectos_dest += ["Otro / Bodega general", "Mantenimiento", "Obra en terreno"]
 
                     col_d1, col_d2 = st.columns(2)
-                    destino_tipo = col_d1.selectbox("destino", proyectos_dest, key="bod_destino_sel")
+                    destino_tipo = col_d1.selectbox("Destino", proyectos_dest, key="bod_destino_sel")
                     destino_otro = col_d2.text_input(
                         "Detalle de destino (si aplica)",
                         placeholder="Ej: Bodega central, vehículo N°3…",
                         key="bod_destino_txt",
                     )
+                    detalle_dest = cosmetic_oracion(destino_otro)
                     if destino_tipo == "— Seleccione destino —":
-                        destino_final = destino_otro.strip()
+                        destino_final = detalle_dest
                     elif destino_tipo == "Otro / Bodega general":
-                        destino_final = destino_otro.strip() or "Bodega general"
+                        destino_final = detalle_dest or "Bodega general"
                     else:
-                        destino_final = destino_tipo if not destino_otro.strip() else f"{destino_tipo} — {destino_otro.strip()}"
+                        destino_final = destino_tipo if not detalle_dest else f"{destino_tipo} — {detalle_dest}"
 
                     if st.button("Registrar movimiento", type="primary", key="bod_btn_mov"):
-                        if not persona_mov.strip():
+                        persona_ui = cosmetic_oracion(persona_mov)
+                        if not persona_ui:
                             st.error("Indica la persona responsable.")
                         elif not destino_final:
                             st.error("Indica el destino del material.")
@@ -2986,7 +3074,7 @@ def _fragment_modulo_bodega():
                                 int(cant_mov),
                                 tipo_mov,
                                 fecha_mov,
-                                persona_mov,
+                                persona_ui,
                                 destino_final,
                             )
                             if not ok:
@@ -3013,14 +3101,12 @@ def _fragment_modulo_bodega():
 
             with st.container(border=True):
                 with st.expander("➕ Alta en inventario de materiales", expanded=False):
-                    st.caption("Familia = partida (400 tornillería). Códigos típicos: 401, 402, 403…")
                     ca, cb, cc = st.columns([1, 1, 2])
                     familia_nueva = ca.number_input("Familia (partida)", min_value=1, step=1, value=400, format="%d", key="bod_fam_nueva")
                     autogen = cb.checkbox("Autogenerar código", value=True, key="bod_autogen")
                     sugerido = sugerir_codigo_bodega(st.session_state.bodega_stock, familia_nueva)
                     if autogen:
                         codigo_nuevo = int(sugerido)
-                        st.caption(f"Código sugerido para familia {int(familia_nueva)}: **{codigo_nuevo}**")
                     else:
                         codigo_nuevo = cb.number_input("Código", min_value=1, step=1, value=int(sugerido), format="%d", key="bod_cod_manual")
                     nombre_nuevo = cc.text_input("Nombre del material", key="bod_nom_nuevo")
@@ -3033,8 +3119,8 @@ def _fragment_modulo_bodega():
                         else:
                             codigo = int(codigo_nuevo)
                             familia = int(familia_nueva)
-                            nombre_material = str(nombre_nuevo).strip()
-                            descripcion = str(desc_nueva).strip()
+                            nombre_material = normalizar_texto_manual(nombre_nuevo, "titulo")
+                            descripcion = normalizar_texto_manual(desc_nueva, "oracion")
                             cantidad = int(stock_inicial)
                             unidad = "un"
                             stock_df = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
@@ -3052,13 +3138,12 @@ def _fragment_modulo_bodega():
 
             with st.container(border=True):
                 st.markdown("#### Inventario actual")
-                st.caption("Datos sincronizados con la tabla **bodega_inventario** en Supabase SQL.")
                 df_stock_editor = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
                 cols_stock = [c for c in COLUMNAS_BODEGA_STOCK if c in df_stock_editor.columns]
                 if df_stock_editor.empty:
                     st.info("El inventario de materiales está vacío. Usa el formulario de alta.")
                 else:
-                    df_stock_edit = st.data_editor(
+                    df_stock_edit = mostrar_editor(
                         df_stock_editor[cols_stock],
                         column_config={
                             "codigo": st.column_config.NumberColumn("Código", min_value=1, step=1, format="%d"),
@@ -3074,7 +3159,6 @@ def _fragment_modulo_bodega():
                         width="stretch",
                         key=f"ed_bodega_stock_{st.session_state.get('bod_stock_rev', 0)}",
                     )
-                    st.caption("El **stock actual** se actualiza automáticamente al registrar entradas o salidas.")
                     if st.button("💾 Guardar inventario de materiales", type="primary", key="bod_save_stock"):
                         if sincronizar_bodega_stock_sql(df_stock_edit):
                             refrescar_sql_ui("Inventario actualizado en bodega_inventario.")
@@ -3188,9 +3272,16 @@ def calcular_liquidaciones(df):
         
         costo_real_empresa = sueldo_imponible + no_imponibles
         costo_empresa_total += costo_real_empresa
-        
+
+        _rut_liq = str(_valor_fila(row, "rut", "RUT", default="")).strip()
+        _rut_out = (
+            formatear_rut(_rut_liq)
+            if _rut_liq and _rut_liq.lower() not in ("sin registro", "nan")
+            else "Sin Registro"
+        )
+
         resultados.append({
-            "rut": str(_valor_fila(row, "rut", "RUT", default="Sin Registro")),
+            "rut": _rut_out,
             "trabajador": str(_valor_fila(row, "trabajador", "Trabajador", default="")),
             "cargo": str(row["cargo"]).strip(),
             "Contrato": tipo_contrato,
@@ -3325,7 +3416,7 @@ def generar_pdf_liquidacion(datos):
     y = 50
     trabajador_limpio = str(datos['trabajador']).encode('latin-1', 'replace').decode('latin-1').upper()
     cargo_limpio = str(datos['cargo']).encode('latin-1', 'replace').decode('latin-1').upper()
-    rut_trabajador = datos.get("rut", "Sin Registro")
+    rut_trabajador = formatear_rut(datos.get("rut", "Sin Registro")) or "Sin Registro"
     
     meses_str = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
     mes_actual = meses_str[datetime.datetime.now().month - 1]
@@ -3680,7 +3771,7 @@ def _render_bodega_historial_comprobantes():
     df_vis = df_fil.drop(columns=["fecha_pura"], errors="ignore").rename(
         columns={k: v for k, v in cols_vis_map.items() if k in df_fil.columns}
     )
-    st.dataframe(df_vis, width="stretch", hide_index=True)
+    mostrar_tabla(df_vis, width="stretch", hide_index=True)
 
     opciones_mov = [
         f"{r.get('Fecha', '—')} | {r['Tipo']} | {r['Código']} — {r['Material']} ({int(r['Cantidad'])} u.)"
@@ -3787,8 +3878,7 @@ mostrar_mensaje_guardado_flash()
 # ==========================================
 if st.session_state.menu_actual == "Inicio":
     st.markdown("## 📊 Panel de Control General")
-    st.caption("Visión global del estado de Voltify SpA.")
-    
+
     total_trabajadores = len(st.session_state.nomina)
     presupuestos_pendientes = st.session_state.presupuestos[st.session_state.presupuestos['Aprobacion'].str.contains('Pendiente', na=False)]['Monto'].sum()
     if pd.isna(presupuestos_pendientes): presupuestos_pendientes = 0
@@ -3842,7 +3932,7 @@ if st.session_state.menu_actual == "Inicio":
             ]
             if not tareas_urgentes.empty:
                 st.write("**Tareas Pendientes en Terreno:**")
-                st.dataframe(tareas_urgentes[['proyecto', 'tarea', 'estado']], hide_index=True, width="stretch")
+                mostrar_tabla(tareas_urgentes[['proyecto', 'tarea', 'estado']], hide_index=True, width="stretch")
             else:
                 st.success("¡Todo al día en terreno!")
             
@@ -3850,7 +3940,7 @@ if st.session_state.menu_actual == "Inicio":
             stock_bajo = st.session_state.bodega_stock[st.session_state.bodega_stock["cantidad"] <= 5]
             if not stock_bajo.empty:
                 st.write("**Materiales con stock bajo (≤ 5 un.):**")
-                st.dataframe(
+                mostrar_tabla(
                     stock_bajo[["codigo", "nombre_material", "cantidad"]],
                     hide_index=True,
                     width="stretch",
@@ -3897,7 +3987,7 @@ elif st.session_state.menu_actual == "Finanzas":
                         colRUT, colA, colB = st.columns([1, 2, 2])
                         n_rut = colRUT.text_input("RUT (Ej: 12.345.678-9)", key=f"n_rut_{fid}")
                         n_trabajador = colA.text_input("Nombre Completo", key=f"n_trab_{fid}")
-                        n_cargo = colB.text_input("cargo", key=f"n_cargo_{fid}")
+                        n_cargo = colB.text_input("Cargo", key=f"n_cargo_{fid}")
                         
                         llave_sueldo = f"sueldo_{fid}"
                         if llave_sueldo not in st.session_state: st.session_state[llave_sueldo] = "0"
@@ -3930,7 +4020,10 @@ elif st.session_state.menu_actual == "Finanzas":
                             if st.button("💾 Guardar Perfil Fijo", type="primary", width="stretch"):
                                 if n_trabajador and n_rut:
                                     nuevo_perfil = pd.DataFrame([{
-                                        "rut": n_rut, "trabajador": n_trabajador, "cargo": n_cargo, "sueldo_base": n_sueldo, 
+                                        "rut": formatear_rut(n_rut),
+                                        "trabajador": cosmetic_oracion(n_trabajador),
+                                        "cargo": cosmetic_oracion(n_cargo),
+                                        "sueldo_base": n_sueldo, 
                                         "jornada_hrs": n_jornada, "tipo_contrato": n_contrato, "gratificacion": n_grati, 
                                         "afp": n_afp, "dias_falta": 0, "horas_atraso": 0, "horas_extras": 0, 
                                         "colacion": n_cola, "movilizacion": n_movi, "anticipo": 0
@@ -3945,13 +4038,12 @@ elif st.session_state.menu_actual == "Finanzas":
                                 limpiar_form_nomina()
                                 st.rerun()
 
-                    st.caption("Modifique las variables del mes directamente en la tabla (Anticipo y Faltas están junto al Sueldo):")
                     df_editor = cargar_nomina_sql(ttl=0)
                     st.session_state.nomina = df_editor
-                    df_nomina_edit = st.data_editor(
+                    df_nomina_edit = mostrar_editor(
                         df_editor,
                         column_config={
-                            "rut": None,
+                            "rut": st.column_config.TextColumn("RUT"),
                             "trabajador": st.column_config.TextColumn("Trabajador"),
                             "cargo": st.column_config.TextColumn("Cargo"),
                             "sueldo_base": st.column_config.NumberColumn("Sueldo Base", min_value=0, step=1000, format="%d"),
@@ -3970,7 +4062,7 @@ elif st.session_state.menu_actual == "Finanzas":
                             "tipo_contrato": st.column_config.SelectboxColumn("Contrato", options=["Indefinido", "Plazo Fijo"]),
                         },
                         column_order=[
-                            "trabajador", "cargo", "sueldo_base", "anticipo", "dias_falta",
+                            "rut", "trabajador", "cargo", "sueldo_base", "anticipo", "dias_falta",
                             "horas_atraso", "horas_extras", "colacion", "movilizacion",
                             "jornada_hrs", "gratificacion", "afp", "tipo_contrato",
                         ],
@@ -3994,9 +4086,9 @@ elif st.session_state.menu_actual == "Finanzas":
                                 ):
                                     pass
                 else:
-                    df_nom_vis = st.session_state.nomina.drop(columns=["rut"], errors="ignore").copy()
+                    df_nom_vis = sanitizar_nomina(st.session_state.nomina.copy())
                     df_nom_vis = df_formateado_clp(df_nom_vis, ["sueldo_base", "colacion", "movilizacion", "anticipo"])
-                    st.dataframe(df_nom_vis, width="stretch")
+                    mostrar_tabla(df_nom_vis, width="stretch")
 
             with st.container(border=True):
                 st.subheader("Proyección de Liquidaciones")
@@ -4013,9 +4105,9 @@ elif st.session_state.menu_actual == "Finanzas":
                     "Total Prevision", "anticipo", "Total a Pagar", "Costo Empresa",
                 ]:
                     if col in df_liq_visual.columns:
-                        df_liq_visual[col] = df_liq_visual[col].apply(formato_clp)
+                        df_liq_visual[col] = df_liq_visual[col].apply(formatear_clp)
                     
-                st.dataframe(df_liq_visual, width="stretch")
+                mostrar_tabla(df_liq_visual, width="stretch")
                 st.info(f"**Costo Total Proyectado de Nómina:** {formato_clp(total_nomina_empresa)}")
                 
                 st.divider()
@@ -4039,7 +4131,7 @@ elif st.session_state.menu_actual == "Finanzas":
             with st.container(border=True):
                 st.subheader("Gastos Fijos Operativos")
                 if st.session_state.acceso_finanzas == "admin":
-                    res_fijos = st.data_editor(
+                    res_fijos = mostrar_editor(
                         st.session_state.gastos_fijos,
                         column_config={
                             "Descripción": st.column_config.TextColumn("Descripción"),
@@ -4049,15 +4141,18 @@ elif st.session_state.menu_actual == "Finanzas":
                         width="stretch",
                     )
                     if st.button("💾 Guardar Cambios Fijos", type="primary"):
-                        st.session_state.gastos_fijos = res_fijos
+                        gf = res_fijos.copy()
+                        if "Descripción" in gf.columns:
+                            gf["Descripción"] = gf["Descripción"].apply(cosmetic_oracion)
+                        st.session_state.gastos_fijos = gf
                         guardar_datos(
                             "Gastos_Fijos",
-                            res_fijos,
+                            gf,
                             refrescar_ui=True,
                             mensaje_flash="Gastos fijos actualizados.",
                         )
                 else:
-                    st.dataframe(
+                    mostrar_tabla(
                         df_formateado_clp(st.session_state.gastos_fijos, ["Monto (CLP)"]),
                         width="stretch",
                     )
@@ -4074,8 +4169,7 @@ elif st.session_state.menu_actual == "Finanzas":
                         oc_fact = st.session_state.proyectos_resumen.at[idx_fact, "Num_OC"]
                         
                         st.divider()
-                        st.markdown("##### Borrador Contable Automático")
-                        st.caption(f"📌 Referencia OC: {oc_fact}")
+                        st.markdown(f"##### Borrador contable — OC: {oc_fact}")
                         neto_calc = int(cobro_fact / 1.19) if cobro_fact > 0 else 0
                         iva_calc = int(cobro_fact - neto_calc)
                         cn, ci, ct = st.columns(3)
@@ -4088,10 +4182,6 @@ elif st.session_state.menu_actual == "Finanzas":
         with tab_rendimiento:
             with st.container(border=True):
                 st.subheader("Rendimiento y capacidad del personal")
-                st.caption(
-                    "Días **asignados** = carga estimada en días hábiles según tareas **pendientes y en proceso** "
-                    "(todos los proyectos). Los **días disponibles** son el balance frente al tope de días hábiles del mes."
-                )
                 lista_rend = st.session_state.nomina["trabajador"].tolist()
                 if not lista_rend:
                     st.info("Registra trabajadores en la pestaña de Nómina para ver esta vista.")
@@ -4114,13 +4204,10 @@ elif st.session_state.menu_actual == "Finanzas":
                         )
                     df_det = tabla_capacidad_personal(st.session_state.operaciones_tareas, lista_rend, yr_r, mes_r)
                     st.markdown("##### Detalle por persona (mes seleccionado)")
-                    st.dataframe(df_det, width="stretch", hide_index=True)
+                    mostrar_tabla(df_det, width="stretch", hide_index=True)
 
                     st.divider()
                     st.markdown("##### Estimación multi-mes (proyección de carga)")
-                    st.caption(
-                        "Misma lógica mes a mes: útil para anticipar picos. La fila inferior muestra los días hábiles de calendario por mes."
-                    )
                     cp1, cp2, cp3 = st.columns(3)
                     with cp1:
                         y0 = st.number_input("Año inicio proyección", 2020, 2035, hoy_r.year, key="fin_proy_y0")
@@ -4136,12 +4223,12 @@ elif st.session_state.menu_actual == "Finanzas":
                         n_meses_proj = st.number_input("Cantidad de meses", min_value=1, max_value=12, value=3, step=1, key="fin_proy_n")
 
                     df_ref = tabla_referencia_dias_habiles(y0, m0, int(n_meses_proj))
-                    st.dataframe(df_ref, width="stretch", hide_index=True)
+                    mostrar_tabla(df_ref, width="stretch", hide_index=True)
 
                     df_proj = tabla_proyeccion_carga_meses(
                         st.session_state.operaciones_tareas, lista_rend, y0, m0, int(n_meses_proj)
                     )
-                    st.dataframe(df_proj, width="stretch", hide_index=True)
+                    mostrar_tabla(df_proj, width="stretch", hide_index=True)
 
 # ==========================================
 # PANTALLA 2: PRESUPUESTOS Y COTIZACIONES
@@ -4167,7 +4254,7 @@ elif st.session_state.menu_actual == "Presupuestos":
                     ref_pres = colP1.selectbox("Seleccionar Proyecto:", proyectos_existentes)
                     fila_pres = df_proy_pres[df_proy_pres["nombre"].astype(str) == ref_pres].iloc[0]
                     cliente_pres = str(fila_pres["empresa"])
-                    colP2.info(f"Cliente vinculado: **{cliente_pres}**")
+                    colP2.info(f"Cliente vinculado: **{cosmetic_oracion(cliente_pres)}**")
                 else:
                     st.warning("Aún no tienes proyectos creados.")
             else:
@@ -4181,8 +4268,7 @@ elif st.session_state.menu_actual == "Presupuestos":
             monto_pres = 0.0
             if tipo_pres == "Asociada a un Proyecto" and ref_pres:
                 monto_pres = float(obtener_cobro_proyecto_sql(ref_pres, ttl=0))
-                colP3.metric("Monto Total Cotizado (CLP)", formato_clp(int(monto_pres)))
-                colP3.caption("Cobro acordado del proyecto (tabla `proyectos`).")
+                colP3.metric("Monto Total Cotizado (CLP)", formatear_clp(int(monto_pres)))
             else:
                 if "input_monto_presupuesto" not in st.session_state:
                     st.session_state["input_monto_presupuesto"] = "0"
@@ -4215,12 +4301,18 @@ elif st.session_state.menu_actual == "Presupuestos":
             if st.button("Guardar Presupuesto", type="primary"):
                 if ref_pres and cliente_pres and monto_pres > 0:
                     str_fecha = fecha_pres.strftime("%Y-%m-%d") if fecha_pres else ""
+                    ref_guardar = (
+                        cosmetic_oracion(ref_pres)
+                        if tipo_pres != "Asociada a un Proyecto"
+                        else str(ref_pres).strip()
+                    )
+                    cliente_guardar = cosmetic_oracion(cliente_pres)
                     nuevo_presupuesto = pd.DataFrame(
                         [
                             {
                                 "Tipo": tipo_pres,
-                                "Referencia": ref_pres,
-                                "Cliente": cliente_pres,
+                                "Referencia": ref_guardar,
+                                "Cliente": cliente_guardar,
                                 "Monto": monto_pres,
                                 "Aprobacion": aprobacion_pres,
                                 "Orden_Compra": orden_pres,
@@ -4267,7 +4359,7 @@ elif st.session_state.menu_actual == "Presupuestos":
             ]
             opciones_orden = ["Sin Orden", "Con Orden"]
 
-            df_pres_edit = st.data_editor(
+            df_pres_edit = mostrar_editor(
                 st.session_state.presupuestos,
                 column_config={
                     "Monto": st.column_config.NumberColumn("Monto Total", min_value=0, step=1000, format="%d"),
@@ -4398,12 +4490,7 @@ elif st.session_state.menu_actual == "Proyectos":
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Cobro Acordado", formato_clp(cobro_acordado))
                 m2.metric("Gastos Totales", formato_clp(gastos_totales))
-                m3.metric("Margen de Ganancia", formato_clp(margen))
-                st.caption(
-                    f"**{fila_proy['empresa']}** · {fila_proy['ciudad']} · OC: {fila_proy['num_oc']} — "
-                    "Cobro acordado = monto total cotizado del presupuesto. "
-                    "Gastos = mano de obra (horas × costo/h) + ítems de gasto."
-                )
+                m3.metric("Margen de Ganancia", formatear_clp(margen))
 
             # —— 3. ASIGNACIÓN DE EQUIPO ——
             with st.container(border=True):
@@ -4431,7 +4518,6 @@ elif st.session_state.menu_actual == "Proyectos":
                                 format="%.1f",
                             )
                             costo_h_prev = calcular_costo_hora_trabajador(trab_sel)
-                            st.caption(f"Costo hora estimado (nómina): **{formato_clp(costo_h_prev)}** / hr")
                             if st.form_submit_button("➕ Añadir al equipo", type="primary"):
                                 if not str(cargo_proy_in).strip():
                                     st.error("Indica el cargo en el proyecto.")
@@ -4444,7 +4530,7 @@ elif st.session_state.menu_actual == "Proyectos":
                                     insertar_proyecto_equipo_sql(
                                         proyecto=proyecto_seleccionado,
                                         trabajador=trab_sel,
-                                        cargo_proyecto=cargo_proy_in,
+                                        cargo_proyecto=cosmetic_oracion(cargo_proy_in),
                                         horas_asignadas=horas_in,
                                         costo_hora_estimado=costo_h_prev,
                                     )
@@ -4458,7 +4544,7 @@ elif st.session_state.menu_actual == "Proyectos":
                     ).round(0).astype(int)
                     df_eq_vis["costo_hora_estimado"] = df_eq_vis["costo_hora_estimado"].apply(formato_clp)
                     df_eq_vis["costo_total"] = df_eq_vis["costo_total"].apply(formato_clp)
-                    st.dataframe(
+                    mostrar_tabla(
                         df_eq_vis[
                             ["trabajador", "cargo_proyecto", "horas_asignadas", "costo_hora_estimado", "costo_total"]
                         ],
@@ -4486,14 +4572,13 @@ elif st.session_state.menu_actual == "Proyectos":
                         item_in = g1.text_input("Item", placeholder="Ej: Arriendo grúa, almuerzo terreno…")
                         cat_in = g2.selectbox("Categoría", CATEGORIAS_PROYECTO_GASTO)
                         monto_in = g3.number_input("Monto ($)", min_value=0, step=1000, value=0, format="%d")
-                        st.caption(formato_clp(int(monto_in)))
                         if st.form_submit_button("Registrar gasto", type="primary"):
                             if not str(item_in).strip():
                                 st.error("El ítem del gasto es obligatorio.")
                             else:
                                 insertar_proyecto_gasto_sql(
                                     proyecto=proyecto_seleccionado,
-                                    item=item_in,
+                                    item=cosmetic_oracion(item_in),
                                     categoria=cat_in,
                                     monto=monto_in,
                                 )
@@ -4503,7 +4588,7 @@ elif st.session_state.menu_actual == "Proyectos":
                 else:
                     df_gv = df_gastos_proy.copy()
                     df_gv["monto_fmt"] = df_gv["monto"].apply(formato_clp)
-                    st.dataframe(
+                    mostrar_tabla(
                         df_gv[["item", "categoria", "monto_fmt"]].rename(
                             columns={"item": "Item", "categoria": "Categoría", "monto_fmt": "Monto"}
                         ),
@@ -4519,108 +4604,6 @@ elif st.session_state.menu_actual == "Proyectos":
                         if st.button("Eliminar gasto seleccionado", key="proy_btn_del_gasto"):
                             item_nom = item_del.split(" — ")[0].strip()
                             eliminar_proyecto_gasto_sql(proyecto_seleccionado, item_nom)
-
-            # —— 5. PRESUPUESTO / COTIZACIÓN (vinculado al proyecto activo) ——
-            with st.container(border=True):
-                st.markdown("#### 📝 Presupuesto y cotización")
-                st.caption(
-                    f"Partidas del proyecto **{proyecto_seleccionado}**. "
-                    "El **Monto total cotizado** refleja el cobro acordado del proyecto (tabla `proyectos`)."
-                )
-                df_pres_proy = cargar_proyecto_presupuesto_sql(ttl=0)
-                df_pres_proy = df_pres_proy[
-                    df_pres_proy["proyecto"].astype(str) == proyecto_seleccionado
-                ].copy()
-                monto_total_cotizado = int(cobro_acordado)
-                st.metric("Monto total cotizado", formato_clp(monto_total_cotizado))
-
-                if es_admin_proy:
-                    with st.expander("Actualizar cobro acordado", expanded=False):
-                        cobro_edit_proy = st.number_input(
-                            "Cobro acordado ($)",
-                            min_value=0,
-                            value=monto_total_cotizado,
-                            step=1,
-                            key=f"proy_cobro_edit_{proyecto_seleccionado}",
-                        )
-                        if st.button(
-                            "Guardar cobro acordado",
-                            type="primary",
-                            key=f"proy_btn_cobro_{proyecto_seleccionado}",
-                        ):
-                            actualizar_cobro_proyecto_sql(
-                                proyecto_seleccionado,
-                                int(cobro_edit_proy),
-                                refrescar_ui=True,
-                                mensaje_flash="Cobro acordado actualizado.",
-                            )
-                    with st.form("form_presupuesto_partida", clear_on_submit=True):
-                        p1, p2, p3 = st.columns([2, 1, 1])
-                        concepto_in = p1.text_input(
-                            "Concepto / partida",
-                            placeholder="Ej: Mano de obra, materiales, arriendo…",
-                        )
-                        cant_in = p2.number_input(
-                            "Cantidad",
-                            min_value=0.1,
-                            step=0.1,
-                            value=1.0,
-                            format="%.1f",
-                        )
-                        precio_in = p3.number_input(
-                            "Precio unitario ($)",
-                            min_value=0,
-                            step=1000,
-                            value=0,
-                            format="%d",
-                        )
-                        monto_prev = int(round(float(cant_in) * int(precio_in)))
-                        st.caption(f"Subtotal partida: **{formato_clp(monto_prev)}**")
-                        if st.form_submit_button("➕ Agregar partida", type="primary"):
-                            insertar_proyecto_presupuesto_linea_sql(
-                                proyecto=proyecto_seleccionado,
-                                concepto=concepto_in,
-                                cantidad=cant_in,
-                                precio_unitario=precio_in,
-                            )
-
-                if df_pres_proy.empty:
-                    st.info("Sin partidas de detalle. El monto total cotizado sigue siendo el cobro acordado del proyecto.")
-                else:
-                    df_pv = df_pres_proy.copy()
-                    df_pv["precio_fmt"] = df_pv["precio_unitario"].apply(formato_clp)
-                    df_pv["monto_fmt"] = df_pv["monto"].apply(formato_clp)
-                    st.dataframe(
-                        df_pv[
-                            ["concepto", "cantidad", "precio_fmt", "monto_fmt"]
-                        ].rename(
-                            columns={
-                                "concepto": "Concepto",
-                                "cantidad": "Cant.",
-                                "precio_fmt": "P. unit.",
-                                "monto_fmt": "Monto",
-                            }
-                        ),
-                        width="stretch",
-                        hide_index=True,
-                    )
-                    if es_admin_proy and "id" in df_pres_proy.columns:
-                        opciones_del_pres = [
-                            f"{r['concepto']} — {formato_clp(r['monto'])}"
-                            for _, r in df_pres_proy.iterrows()
-                        ]
-                        ids_pres = df_pres_proy["id"].tolist()
-                        idx_del_pres = st.selectbox(
-                            "Eliminar partida",
-                            range(len(opciones_del_pres)),
-                            format_func=lambda i: opciones_del_pres[i],
-                            key="proy_del_pres_partida",
-                        )
-                        if st.button("Eliminar partida seleccionada", key="proy_btn_del_pres"):
-                            eliminar_proyecto_presupuesto_linea_sql(
-                                proyecto_seleccionado,
-                                ids_pres[idx_del_pres],
-                            )
 
             if es_admin_proy:
                 st.divider()
@@ -4686,18 +4669,15 @@ elif st.session_state.menu_actual == "Balance":
         if vista_balance == "Proyección Anual (12 Meses)":
             meses_filtrados = meses_año_actual
             titulo_metricas = "Proyección Anual (Año en Curso)"
-            desc_metricas = "Rendimiento y proyección de los 12 meses del año actual."
         elif vista_balance == "Vista Mensual Específica":
             mes_actual_str = f"{current_year}-{str(datetime.datetime.now().month).zfill(2)}"
             idx_mes = meses_totales.index(mes_actual_str) if mes_actual_str in meses_totales else 0
             mes_seleccionado = col_f2.selectbox("Seleccionar Mes:", meses_totales, index=idx_mes)
             meses_filtrados = [mes_seleccionado]
             titulo_metricas = f"Balance del Mes: {mes_seleccionado}"
-            desc_metricas = "Análisis aislado de ingresos y egresos para el mes seleccionado."
         else: 
             meses_filtrados = meses_totales
             titulo_metricas = "Balance Histórico Acumulado"
-            desc_metricas = "Suma global de todos los meses y proyectos registrados."
             
         df_filtrado = df_full[df_full["Mes"].isin(meses_filtrados)].copy()
         
@@ -4714,8 +4694,7 @@ elif st.session_state.menu_actual == "Balance":
         
         st.divider()
         st.markdown(f"**{titulo_metricas}**")
-        st.caption(desc_metricas)
-        
+
         c1, c2, c3 = st.columns(3)
         c1.metric("Ingresos Acumulados", formato_clp(ingresos_totales))
         c2.metric("Egresos Acumulados", formato_clp(egresos_totales))
@@ -4725,8 +4704,7 @@ elif st.session_state.menu_actual == "Balance":
     
     with st.container(border=True):
         st.markdown("#### 📈 Estado de Resultado Mensualizado")
-        st.caption("Las barras muestran el balance de ingresos y salidas de capital.")
-        
+
         if vista_balance == "Histórico Completo":
             x_scale = alt.Scale() 
             x_sort = meses_totales
