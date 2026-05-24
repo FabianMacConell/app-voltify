@@ -1838,6 +1838,97 @@ if 'gastos_fijos' not in st.session_state:
     st.session_state.gastos_fijos = cargar_datos("Gastos_Fijos", df_fijos_base)
 
 COLUMNAS_BODEGA_STOCK = ["codigo", "familia", "nombre_material", "descripcion", "cantidad", "unidad"]
+
+CATEGORIAS_BODEGA_BLOQUES = [
+    {
+        "nombre": "Herramientas e Instrumentación",
+        "bloque_min": 1000,
+        "bloque_max": 1999,
+        "base_inicial": 1100,
+        "familia": 1000,
+    },
+    {
+        "nombre": "Conductores y Cables",
+        "bloque_min": 2000,
+        "bloque_max": 2999,
+        "base_inicial": 2100,
+        "familia": 2000,
+    },
+    {
+        "nombre": "Canalizaciones y Conducción",
+        "bloque_min": 3000,
+        "bloque_max": 3999,
+        "base_inicial": 3100,
+        "familia": 3000,
+    },
+    {
+        "nombre": "Protecciones y Tableros",
+        "bloque_min": 4000,
+        "bloque_max": 4999,
+        "base_inicial": 4100,
+        "familia": 4000,
+    },
+    {
+        "nombre": "Terminales, Iluminación y Consumibles",
+        "bloque_min": 5000,
+        "bloque_max": 5999,
+        "base_inicial": 5100,
+        "familia": 5000,
+    },
+]
+CATEGORIAS_BODEGA_NOMBRES = [c["nombre"] for c in CATEGORIAS_BODEGA_BLOQUES]
+CATEGORIAS_BODEGA_MAP = {c["nombre"]: c for c in CATEGORIAS_BODEGA_BLOQUES}
+
+
+def familia_partida_por_codigo(codigo):
+    """Nombre de Familia (Partida) según bloque del código de ingeniería (1100, 2100, …)."""
+    try:
+        cod = int(codigo)
+    except (ValueError, TypeError):
+        return ""
+    for cfg in CATEGORIAS_BODEGA_BLOQUES:
+        if cfg["bloque_min"] <= cod <= cfg["bloque_max"]:
+            return cfg["nombre"]
+    return ""
+
+
+def formato_codigo_bodega(codigo):
+    """Código de material como entero de 4 dígitos para UI y PDF."""
+    return str(int(codigo))
+
+
+def etiqueta_selector_material_bodega(codigo, nombre_material, cantidad):
+    """Etiqueta del selectbox de movimientos: 4100 — Nombre (Stock: 15)."""
+    nom = str(nombre_material or "").strip()
+    return f"{formato_codigo_bodega(codigo)} — {nom} (Stock: {int(cantidad)})"
+
+
+def etiqueta_selector_codigo_bodega(codigo, nombre_material):
+    """Etiqueta del selector por código: 4100 — Automático Trifásico."""
+    nom = str(nombre_material or "").strip()
+    return f"{formato_codigo_bodega(codigo)} — {nom}"
+
+
+def obtener_datos_material_bodega(df_stock, codigo):
+    """Datos maestros del inventario para un código (movimientos)."""
+    df = sanitizar_bodega_stock(df_stock)
+    if df is None or df.empty:
+        return None
+    fila = df[df["codigo"] == int(codigo)]
+    if fila.empty:
+        return None
+    r = fila.iloc[0]
+    cod = int(r["codigo"])
+    nombre_raw = str(r.get("nombre_material", "")).strip()
+    return {
+        "codigo": cod,
+        "nombre_material": normalizar_texto_manual(nombre_raw, "titulo") if nombre_raw else "",
+        "familia_partida": familia_partida_por_codigo(cod),
+        "descripcion": normalizar_texto_manual(r.get("descripcion", ""), "oracion"),
+        "stock": int(r["cantidad"]),
+    }
+
+
 COLUMNAS_BODEGA_HISTORIAL = [
     "fecha", "tipo_movimiento", "codigo", "nombre_material", "cantidad",
     "persona_responsable", "destino", "stock_resultante",
@@ -1846,6 +1937,71 @@ COLUMNAS_BODEGA_MOVIMIENTOS = [
     "id", "fecha", "tipo_movimiento", "codigo", "nombre_material", "cantidad",
     "persona_responsable", "destino", "detalle_destino", "stock_resultante",
 ]
+
+
+def enriquecer_df_movimientos_bodega(df):
+    """Añade familia_partida y codigo_str para filtros e historial."""
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame(columns=list(COLUMNAS_BODEGA_MOVIMIENTOS) + ["familia_partida", "codigo_str"])
+    out = df.copy()
+    out["codigo"] = pd.to_numeric(out["codigo"], errors="coerce").fillna(0).astype(int)
+    out["familia_partida"] = out["codigo"].apply(familia_partida_por_codigo)
+    out["codigo_str"] = out["codigo"].apply(formato_codigo_bodega)
+    return out
+
+
+_ALIASES_COL_MOV_BODEGA = {
+    "codigo": ("Código", "codigo", "codigo_str"),
+    "fecha": ("Fecha", "fecha"),
+    "tipo_movimiento": ("Tipo de movimiento", "tipo_movimiento"),
+    "nombre_material": ("Nombre material", "nombre_material"),
+    "cantidad": ("Cantidad", "cantidad"),
+    "persona_responsable": ("Persona responsable", "persona_responsable"),
+    "destino": ("Destino", "destino"),
+    "detalle_destino": ("Detalle destino", "detalle_destino"),
+    "stock_resultante": ("Stock resultante", "stock_resultante"),
+    "familia_partida": ("Familia (Partida)", "familia_partida"),
+}
+
+
+def _col_movimiento_df(df, clave_logica):
+    """Resuelve nombre real de columna (UI con mayúsculas o snake_case SQL)."""
+    if df is None or getattr(df, "empty", True):
+        return None
+    for nombre in _ALIASES_COL_MOV_BODEGA.get(clave_logica, (clave_logica,)):
+        if nombre in df.columns:
+            return nombre
+    return None
+
+
+def _normalizar_df_movimientos_para_pdf(df):
+    """Unifica columnas del historial/editor a snake_case para PDF y exportación."""
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame(columns=COLUMNAS_BODEGA_MOVIMIENTOS)
+    out = df.copy()
+    renombres_ui = {
+        "Fecha": "fecha",
+        "Tipo de movimiento": "tipo_movimiento",
+        "Código": "codigo",
+        "Nombre material": "nombre_material",
+        "Cantidad": "cantidad",
+        "Persona responsable": "persona_responsable",
+        "Destino": "destino",
+        "Detalle destino": "detalle_destino",
+        "Stock resultante": "stock_resultante",
+        "Familia (Partida)": "familia_partida",
+    }
+    out = out.rename(columns={k: v for k, v in renombres_ui.items() if k in out.columns})
+    col_cod = _col_movimiento_df(out, "codigo")
+    if col_cod and col_cod != "codigo":
+        out["codigo"] = pd.to_numeric(out[col_cod], errors="coerce").fillna(0).astype(int)
+    elif "codigo" in out.columns:
+        out["codigo"] = pd.to_numeric(out["codigo"], errors="coerce").fillna(0).astype(int)
+    for col in ("cantidad", "stock_resultante"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0).astype(int)
+    return out
+
 
 def sanitizar_bodega_stock(df):
     if df is None or df.empty:
@@ -1889,24 +2045,75 @@ if 'bodega_stock' not in st.session_state or 'bodega_historial' not in st.sessio
     st.session_state.bodega_stock = _bod_stock
     st.session_state.bodega_historial = _bod_hist
 
-def sugerir_codigo_bodega(df_stock, familia):
-    """Siguiente código entero en la partida (ej. familia 400 → 401, 402…)."""
-    familia = int(familia)
-    df = sanitizar_bodega_stock(df_stock)
-    en_familia = df[(df["codigo"] > familia) & (df["codigo"] < familia + 100)]
-    if en_familia.empty:
-        return familia + 1
-    return int(en_familia["codigo"].max()) + 1
+def obtener_max_codigo_bodega_en_bloque(bloque_min, bloque_max, ttl=0):
+    """MAX(codigo) en bodega_inventario dentro del rango del bloque (1000–1999, etc.)."""
+    bloque_min = int(bloque_min)
+    bloque_max = int(bloque_max)
+    try:
+        df_raw = conn.query(
+            f"""
+            SELECT MAX(codigo) AS max_codigo
+            FROM bodega_inventario
+            WHERE codigo >= {bloque_min} AND codigo <= {bloque_max}
+            """,
+            ttl=ttl,
+        )
+        if df_raw is None or df_raw.empty:
+            return None
+        out = df_raw.copy()
+        out.columns = [str(c).strip().lower().replace(" ", "_") for c in out.columns]
+        max_val = out.iloc[0].get("max_codigo")
+        if max_val is None or (isinstance(max_val, float) and pd.isna(max_val)):
+            return None
+        return int(max_val)
+    except Exception:
+        return None
+
+
+def sugerir_codigo_bodega_por_categoria(categoria_nombre, ttl=0):
+    """
+    Siguiente código libre en el bloque de la categoría.
+    Sin productos en el bloque → base_inicial (1100, 2100, …).
+    Con productos → max_codigo + 1.
+    Retorna (codigo, familia_bloque, cfg).
+    """
+    cfg = CATEGORIAS_BODEGA_MAP.get(str(categoria_nombre).strip())
+    if not cfg:
+        raise ValueError(f"Categoría de bodega no reconocida: {categoria_nombre}")
+    max_codigo = obtener_max_codigo_bodega_en_bloque(cfg["bloque_min"], cfg["bloque_max"], ttl=ttl)
+    if max_codigo is None:
+        codigo = int(cfg["base_inicial"])
+    else:
+        codigo = int(max_codigo) + 1
+    return codigo, int(cfg["familia"]), cfg
 
 def opciones_material_bodega(df_stock):
+    """Opciones ordenadas por código para Entrada/Salida (mapa etiqueta → codigo int)."""
     df = sanitizar_bodega_stock(df_stock)
     if df.empty:
         return [], {}
+    df = df.sort_values("codigo")
     opts = []
     mapa = {}
     for _, r in df.iterrows():
         cod = int(r["codigo"])
-        label = f"{cod} — {r['nombre_material']} (stock: {int(r['cantidad'])})"
+        label = etiqueta_selector_material_bodega(cod, r["nombre_material"], r["cantidad"])
+        opts.append(label)
+        mapa[label] = cod
+    return opts, mapa
+
+
+def opciones_codigo_material_bodega(df_stock):
+    """Selector principal por código: 4100 — Nombre (sin stock en la etiqueta)."""
+    df = sanitizar_bodega_stock(df_stock)
+    if df.empty:
+        return [], {}
+    df = df.sort_values("codigo")
+    opts = []
+    mapa = {}
+    for _, r in df.iterrows():
+        cod = int(r["codigo"])
+        label = etiqueta_selector_codigo_bodega(cod, r["nombre_material"])
         opts.append(label)
         mapa[label] = cod
     return opts, mapa
@@ -1931,7 +2138,9 @@ def stock_actual_material(codigo):
         return None
     return int(fila.iloc[0]["cantidad"])
 
-def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, destino):
+def registrar_movimiento_bodega(
+    codigo, cantidad, tipo_mov, fecha, persona, destino, nombre_material=None
+):
     """
     Consulta stock actual, calcula Entrada/Salida, UPDATE inventario + INSERT historial (una transacción).
     Retorna (ok, mensaje, stock_resultante o None).
@@ -1941,6 +2150,8 @@ def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, dest
         return False, "La cantidad debe ser un entero mayor a 0.", None
 
     codigo = int(codigo)
+    if codigo <= 0:
+        return False, "Selecciona un material con código válido (4 dígitos).", None
     tipo_movimiento = str(tipo_mov).strip()
 
     fila_stock = obtener_stock_actual_bodega_sql(codigo, ttl=0)
@@ -1948,7 +2159,10 @@ def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, dest
         return False, f"No existe material con código {codigo}.", None
 
     stock_actual = int(fila_stock["cantidad"])
-    nombre_material = str(fila_stock["nombre_material"])
+    if nombre_material is not None and str(nombre_material).strip():
+        nombre_material = normalizar_texto_manual(nombre_material, "titulo")
+    else:
+        nombre_material = normalizar_texto_manual(fila_stock["nombre_material"], "titulo")
 
     if _es_entrada_bodega(tipo_movimiento):
         nuevo_stock = stock_actual + cantidad_digitada
@@ -3013,20 +3227,46 @@ def _fragment_modulo_bodega():
                     st.warning("Primero registra materiales en la pestaña **Inventario de materiales**.")
                 else:
                     bod_rev = st.session_state.get("bod_stock_rev", 0)
-                    opciones_mat, mapa_mat = opciones_material_bodega(st.session_state.bodega_stock)
-                    col_tipo, col_mat = st.columns([1, 2])
-                    tipo_mov = col_tipo.selectbox("Tipo de movimiento", ["Entrada", "Salida"], key="bod_tipo_mov")
-                    material_sel = col_mat.selectbox(
-                        "Material (código — nombre)",
-                        opciones_mat,
-                        key=f"bod_material_sel_{bod_rev}",
+                    df_stock_mov = sanitizar_bodega_stock(
+                        cargar_bodega_inventario_sql(ttl=0)[0]
                     )
-                    codigo_mov = mapa_mat.get(material_sel)
+                    opciones_cod, mapa_cod = opciones_codigo_material_bodega(df_stock_mov)
+                    col_tipo, col_cod = st.columns([1, 2])
+                    tipo_mov = col_tipo.selectbox("Tipo de movimiento", ["Entrada", "Salida"], key="bod_tipo_mov")
+                    codigo_sel = col_cod.selectbox(
+                        "Código de material",
+                        opciones_cod,
+                        key=f"bod_codigo_sel_{bod_rev}",
+                    )
+                    codigo_mov = mapa_cod.get(codigo_sel)
 
-                    if codigo_mov is not None:
-                        stock_previo = stock_actual_material(codigo_mov)
-                        if stock_previo is not None:
-                            col_mat.caption(f"Stock actual en bodega: **{stock_previo}** un.")
+                    datos_mat = (
+                        obtener_datos_material_bodega(df_stock_mov, codigo_mov)
+                        if codigo_mov is not None
+                        else None
+                    )
+                    material_detectado = datos_mat["nombre_material"] if datos_mat else ""
+                    familia_detectada = datos_mat["familia_partida"] if datos_mat else ""
+                    stock_previo = datos_mat["stock"] if datos_mat else None
+
+                    col_info1, col_info2 = st.columns(2)
+                    col_info1.text_input(
+                        "Descripción / Material",
+                        value=material_detectado,
+                        disabled=True,
+                        key=f"bod_mov_material_{codigo_mov}_{bod_rev}",
+                    )
+                    col_info2.text_input(
+                        "Familia (Partida)",
+                        value=familia_detectada,
+                        disabled=True,
+                        key=f"bod_mov_familia_{codigo_mov}_{bod_rev}",
+                    )
+                    if codigo_mov is not None and stock_previo is not None:
+                        st.caption(
+                            f"Stock actual en bodega: **{stock_previo}** un. "
+                            f"(Código **{formato_codigo_bodega(codigo_mov)}**)"
+                        )
 
                     c1, c2, c3 = st.columns(3)
                     cant_mov = c1.number_input(
@@ -3067,74 +3307,126 @@ def _fragment_modulo_bodega():
                         elif not destino_final:
                             st.error("Indica el destino del material.")
                         elif codigo_mov is None:
-                            st.error("Selecciona un material válido.")
+                            st.error("Selecciona un código de material válido.")
                         else:
-                            ok, msg, _stock_res = registrar_movimiento_bodega(
-                                codigo_mov,
-                                int(cant_mov),
-                                tipo_mov,
-                                fecha_mov,
-                                persona_ui,
-                                destino_final,
-                            )
-                            if not ok:
-                                st.error(msg)
+                            df_save = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
+                            datos_guardar = obtener_datos_material_bodega(df_save, codigo_mov)
+                            if not datos_guardar:
+                                st.error("No se encontró el material en inventario.")
+                            else:
+                                ok, msg, _stock_res = registrar_movimiento_bodega(
+                                    codigo_mov,
+                                    int(cant_mov),
+                                    tipo_mov,
+                                    fecha_mov,
+                                    persona_ui,
+                                    destino_final,
+                                    nombre_material=datos_guardar["nombre_material"],
+                                )
+                                if not ok:
+                                    st.error(msg)
 
         with tab_stock:
             with st.container(border=True):
                 st.markdown("#### 🔍 Buscar en inventario de materiales")
                 busqueda_bod = st.text_input(
                     "Buscar por código o nombre:",
-                    placeholder="Ej: 401, tornillo, cable…",
+                    placeholder="Ej: 4100, Conductores, cable…",
                     key="bod_busqueda",
                 )
                 df_stock_vista = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
                 if busqueda_bod:
-                    mask_b = (
-                        df_stock_vista["codigo"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                        | df_stock_vista["nombre_material"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                        | df_stock_vista["familia"].astype(str).str.contains(busqueda_bod, case=False, na=False)
+                    df_stock_vista = df_stock_vista.copy()
+                    df_stock_vista["_familia_partida"] = df_stock_vista["codigo"].apply(
+                        familia_partida_por_codigo
                     )
+                    q_bod = busqueda_bod.strip()
+                    q_bod_low = q_bod.lower()
+                    q_bod_digitos = "".join(c for c in q_bod if c.isdigit())
+                    mask_b = (
+                        df_stock_vista["nombre_material"].astype(str).str.lower().str.contains(
+                            q_bod_low, na=False
+                        )
+                        | df_stock_vista["_familia_partida"].astype(str).str.lower().str.contains(
+                            q_bod_low, na=False
+                        )
+                    )
+                    if q_bod_digitos:
+                        mask_b = mask_b | df_stock_vista["codigo"].astype(str).str.contains(
+                            q_bod_digitos, na=False
+                        )
+                    else:
+                        mask_b = mask_b | df_stock_vista["codigo"].astype(str).str.contains(
+                            q_bod, case=False, na=False
+                        )
                     df_stock_vista = df_stock_vista[mask_b]
                     if df_stock_vista.empty:
                         st.warning("Sin coincidencias en el inventario de materiales.")
 
             with st.container(border=True):
                 with st.expander("➕ Alta en inventario de materiales", expanded=False):
-                    ca, cb, cc = st.columns([1, 1, 2])
-                    familia_nueva = ca.number_input("Familia (partida)", min_value=1, step=1, value=400, format="%d", key="bod_fam_nueva")
-                    autogen = cb.checkbox("Autogenerar código", value=True, key="bod_autogen")
-                    sugerido = sugerir_codigo_bodega(st.session_state.bodega_stock, familia_nueva)
-                    if autogen:
-                        codigo_nuevo = int(sugerido)
-                    else:
-                        codigo_nuevo = cb.number_input("Código", min_value=1, step=1, value=int(sugerido), format="%d", key="bod_cod_manual")
-                    nombre_nuevo = cc.text_input("Nombre del material", key="bod_nom_nuevo")
+                    col_fam, col_cod, col_nom = st.columns([2, 1, 2])
+                    familia_partida_sel = col_fam.selectbox(
+                        "Familia (Partida) de Inventario",
+                        CATEGORIAS_BODEGA_NOMBRES,
+                        key="bod_familia_partida_sel",
+                    )
+                    codigo_sugerido, familia_bloque, cfg_bod = sugerir_codigo_bodega_por_categoria(
+                        familia_partida_sel, ttl=0
+                    )
+                    if codigo_sugerido > cfg_bod["bloque_max"]:
+                        col_fam.warning(
+                            f"Sin códigos libres en el bloque {cfg_bod['bloque_min']}–{cfg_bod['bloque_max']}."
+                        )
+                    col_cod.number_input(
+                        "Código",
+                        min_value=int(codigo_sugerido),
+                        max_value=int(codigo_sugerido),
+                        value=int(codigo_sugerido),
+                        step=1,
+                        format="%d",
+                        disabled=True,
+                        key=f"bod_cod_auto_{familia_partida_sel}",
+                    )
+                    nombre_nuevo = col_nom.text_input("Nombre del material", key="bod_nom_nuevo")
                     cd1, cd2 = st.columns(2)
-                    desc_nueva = cd1.text_input("Descripción / categoría", placeholder="Ej: Tornillería", key="bod_desc_nueva")
-                    stock_inicial = cd2.number_input("Stock inicial", min_value=0, step=1, value=0, format="%d", key="bod_stock_ini")
+                    desc_nueva = cd1.text_input(
+                        "Descripción / categoría",
+                        placeholder="Ej: Tornillería",
+                        key="bod_desc_nueva",
+                    )
+                    stock_inicial = cd2.number_input(
+                        "Stock inicial", min_value=0, step=1, value=0, format="%d", key="bod_stock_ini"
+                    )
                     if st.button("Guardar material", type="primary", key="bod_btn_alta"):
                         if not str(nombre_nuevo).strip():
                             st.error("El nombre del material es obligatorio.")
                         else:
-                            codigo = int(codigo_nuevo)
-                            familia = int(familia_nueva)
-                            nombre_material = normalizar_texto_manual(nombre_nuevo, "titulo")
-                            descripcion = normalizar_texto_manual(desc_nueva, "oracion")
-                            cantidad = int(stock_inicial)
-                            unidad = "un"
-                            stock_df = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
-                            if (stock_df["codigo"] == codigo).any():
-                                st.error(f"El código {codigo} ya existe. Elige otro o activa autogenerar.")
-                            else:
-                                insertar_material_bodega_sql(
-                                    codigo=codigo,
-                                    familia=familia,
-                                    nombre_material=nombre_material,
-                                    descripcion=descripcion,
-                                    cantidad=cantidad,
-                                    unidad=unidad,
+                            codigo, familia, cfg_guardar = sugerir_codigo_bodega_por_categoria(
+                                familia_partida_sel, ttl=0
+                            )
+                            if codigo > cfg_guardar["bloque_max"]:
+                                st.error(
+                                    f"No hay códigos disponibles en el bloque "
+                                    f"{cfg_guardar['bloque_min']}–{cfg_guardar['bloque_max']}."
                                 )
+                            else:
+                                nombre_material = normalizar_texto_manual(nombre_nuevo, "titulo")
+                                descripcion = normalizar_texto_manual(desc_nueva, "oracion")
+                                cantidad = int(stock_inicial)
+                                unidad = "un"
+                                stock_df = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
+                                if (stock_df["codigo"] == codigo).any():
+                                    st.error(f"El código {codigo} ya existe. Actualiza la página e intenta de nuevo.")
+                                else:
+                                    insertar_material_bodega_sql(
+                                        codigo=codigo,
+                                        familia=familia,
+                                        nombre_material=nombre_material,
+                                        descripcion=descripcion,
+                                        cantidad=cantidad,
+                                        unidad=unidad,
+                                    )
 
             with st.container(border=True):
                 st.markdown("#### Inventario actual")
@@ -3637,47 +3929,24 @@ def generar_etiqueta_pdf(serie):
     os.remove(temp_path)
     return pdf_bytes
 
-def generar_pdf_vale_bodega(mov):
-    """Vale de bodega en cuadrícula (FPDF, 8pt)."""
-    pdf = FPDF(unit="mm", format="A4")
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+def _pdf_valor_movimiento_bodega(mov, clave, default=""):
+    for nombre in _ALIASES_COL_MOV_BODEGA.get(clave, (clave,)):
+        try:
+            if hasattr(mov, "index") and nombre in mov.index:
+                v = mov[nombre]
+            elif hasattr(mov, "get"):
+                v = mov.get(nombre)
+            else:
+                continue
+            if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                return v
+        except (KeyError, TypeError, AttributeError):
+            continue
+    return default
 
-    def _val(clave, default=""):
-        if hasattr(mov, "get"):
-            v = mov.get(clave, default)
-        else:
-            v = getattr(mov, clave, default) if clave in mov.index else default
-        if v is None or (isinstance(v, float) and pd.isna(v)):
-            return default
-        return v
 
-    filas_datos = [
-        ("Tipo de movimiento", str(_val("tipo_movimiento"))),
-        ("Código", str(int(_val("codigo", 0) or 0))),
-        ("Material", str(_val("nombre_material"))),
-        ("Cantidad", str(int(_val("cantidad", 0) or 0))),
-        ("Fecha", str(_val("fecha"))),
-        ("Persona responsable", str(_val("persona_responsable"))),
-        ("Destino", str(_val("destino"))),
-        ("Detalle del destino", str(_val("detalle_destino")) or "—"),
-        ("Stock resultante", str(int(_val("stock_resultante", 0) or 0))),
-    ]
-
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, _pdf_texto_latin1("Voltify ERP - VALE DE BODEGA"), ln=True, align="C")
-    pdf.ln(4)
-
-    x0, w_lbl, w_val, h = 15, 55, 120, 7
-    _pdf_celda(pdf, x0, pdf.get_y(), w_lbl + w_val, h, "Datos del movimiento", align="C", header=True)
-    y = pdf.get_y() + h
-    pdf.set_font("Arial", "", 8)
-    for etiqueta, valor in filas_datos:
-        _pdf_celda(pdf, x0, y, w_lbl, h, etiqueta, bold=False, font_size=8)
-        _pdf_celda(pdf, x0 + w_lbl, y, w_val, h, valor, align="L", font_size=8)
-        y += h
-
-    y += 12
+def _pdf_dibujar_firmas_bodega(pdf, y):
+    """Bloque de firmas al final del vale/comprobante."""
     ancho_firma = 75
     espacio = 20
     x_f1 = 15
@@ -3690,6 +3959,121 @@ def generar_pdf_vale_bodega(mov):
     pdf.cell(ancho_firma, 5, _pdf_texto_latin1("Firma Encargado Bodega"), align="C")
     pdf.set_xy(x_f2, y)
     pdf.cell(ancho_firma, 5, _pdf_texto_latin1("Firma Persona que Retira"), align="C")
+    return y + 8
+
+
+def _pdf_dibujar_detalle_movimiento_bodega(pdf, mov, y_inicio, _pdf_fs=8):
+    """Cuadrícula detalle para un solo movimiento. Retorna Y final."""
+    cod_pdf = int(_pdf_valor_movimiento_bodega(mov, "codigo", 0) or 0)
+    detalle = str(_pdf_valor_movimiento_bodega(mov, "detalle_destino", "") or "").strip() or "—"
+    filas_datos = [
+        ("Tipo de movimiento", str(_pdf_valor_movimiento_bodega(mov, "tipo_movimiento"))),
+        ("Código", formato_codigo_bodega(cod_pdf) if cod_pdf else "—"),
+        ("Nombre material", str(_pdf_valor_movimiento_bodega(mov, "nombre_material"))),
+        ("Cantidad", str(int(_pdf_valor_movimiento_bodega(mov, "cantidad", 0) or 0))),
+        ("Persona responsable", str(_pdf_valor_movimiento_bodega(mov, "persona_responsable"))),
+        ("Destino", str(_pdf_valor_movimiento_bodega(mov, "destino"))),
+        ("Detalle destino", detalle),
+        ("Stock resultante", str(int(_pdf_valor_movimiento_bodega(mov, "stock_resultante", 0) or 0))),
+    ]
+    x0, w_lbl, w_val, h = 15, 58, 117, 6.5
+    y = y_inicio
+    _pdf_celda(pdf, x0, y, w_lbl + w_val, h, "Datos del movimiento", align="C", header=True)
+    y += h
+    for etiqueta, valor in filas_datos:
+        _pdf_celda(pdf, x0, y, w_lbl, h, etiqueta, bold=False, font_size=_pdf_fs)
+        alineacion = "C" if etiqueta == "Código" else "L"
+        _pdf_celda(pdf, x0 + w_lbl, y, w_val, h, str(valor), align=alineacion, font_size=_pdf_fs)
+        y += h
+    fam_pdf = familia_partida_por_codigo(cod_pdf)
+    if fam_pdf:
+        pdf.set_font("Arial", "I", 7)
+        pdf.set_xy(x0, y)
+        pdf.cell(w_lbl + w_val, 4, _pdf_texto_latin1(f"Familia (Partida): {fam_pdf}"), align="L")
+        y += 5
+    return y + 4
+
+
+def _pdf_dibujar_tabla_movimientos_bodega(pdf, df_movs, y_inicio, _pdf_fs=8):
+    """Tabla compacta para varios movimientos seleccionados. Retorna Y final."""
+    x0 = 10
+    anchos = [22, 20, 16, 48, 14, 18, 42]
+    headers = [
+        "Fecha",
+        "Tipo de movimiento",
+        "Código",
+        "Nombre material",
+        "Cantidad",
+        "Stock resultante",
+        "Persona responsable",
+    ]
+    h = 6.5
+    y = y_inicio
+    for i, hdr in enumerate(headers):
+        _pdf_celda(pdf, x0 + sum(anchos[:i]), y, anchos[i], h, hdr, align="C", header=True, font_size=_pdf_fs)
+    y += h
+    pdf.set_font("Arial", "", _pdf_fs)
+
+    def _fila_encabezado_tabla(y_pos):
+        for i, hdr in enumerate(headers):
+            _pdf_celda(
+                pdf, x0 + sum(anchos[:i]), y_pos, anchos[i], h, hdr,
+                align="C", header=True, font_size=_pdf_fs,
+            )
+        return y_pos + h
+
+    for _, row in df_movs.iterrows():
+        if y > 250:
+            pdf.add_page()
+            y = _fila_encabezado_tabla(15)
+        cod = int(_pdf_valor_movimiento_bodega(row, "codigo", 0) or 0)
+        vals = [
+            str(_pdf_valor_movimiento_bodega(row, "fecha", "")),
+            str(_pdf_valor_movimiento_bodega(row, "tipo_movimiento", "")),
+            formato_codigo_bodega(cod) if cod else "—",
+            str(_pdf_valor_movimiento_bodega(row, "nombre_material", ""))[:38],
+            str(int(_pdf_valor_movimiento_bodega(row, "cantidad", 0) or 0)),
+            str(int(_pdf_valor_movimiento_bodega(row, "stock_resultante", 0) or 0)),
+            str(_pdf_valor_movimiento_bodega(row, "persona_responsable", ""))[:28],
+        ]
+        for i, val in enumerate(vals):
+            _pdf_celda(
+                pdf, x0 + sum(anchos[:i]), y, anchos[i], h, val,
+                align="C" if i == 2 else "L", font_size=_pdf_fs,
+            )
+        y += h
+    return y + 4
+
+
+def generar_pdf_comprobante_bodega(df_movimientos):
+    """PDF de comprobante para uno o más movimientos seleccionados en historial."""
+    if df_movimientos is None or getattr(df_movimientos, "empty", True):
+        raise ValueError("No hay movimientos seleccionados para el comprobante.")
+    df_movs = _normalizar_df_movimientos_para_pdf(df_movimientos).reset_index(drop=True)
+    n = len(df_movs)
+    pdf = FPDF(unit="mm", format="A4")
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    _pdf_fs = 8
+
+    pdf.set_font("Arial", "B", 14)
+    titulo = "Voltify ERP - COMPROBANTE DE BODEGA"
+    pdf.cell(0, 10, _pdf_texto_latin1(titulo), ln=True, align="C")
+    pdf.set_font("Arial", "", _pdf_fs)
+    pdf.cell(0, 6, _pdf_texto_latin1(f"Movimientos incluidos: {n}"), ln=True, align="C")
+    pdf.ln(3)
+
+    y = pdf.get_y()
+    if n == 1:
+        y = _pdf_dibujar_detalle_movimiento_bodega(pdf, df_movs.iloc[0], y, _pdf_fs=_pdf_fs)
+    else:
+        y = _pdf_dibujar_tabla_movimientos_bodega(pdf, df_movs, y, _pdf_fs=_pdf_fs)
+
+    y_firmas = y + 10
+    if y_firmas > 255:
+        pdf.add_page()
+        y_firmas = 20
+    _pdf_dibujar_firmas_bodega(pdf, y_firmas)
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         temp_path = tmp.name
@@ -3700,6 +4084,45 @@ def generar_pdf_vale_bodega(mov):
     return pdf_bytes
 
 
+def generar_pdf_vale_bodega(mov):
+    """Vale de bodega (un movimiento). Compatibilidad con llamadas existentes."""
+    if isinstance(mov, pd.DataFrame):
+        return generar_pdf_comprobante_bodega(mov)
+    return generar_pdf_comprobante_bodega(pd.DataFrame([mov]))
+
+
+def _filtrar_movimientos_bodega(df_mov, buscar_mov, filtro_tipo, rango_fechas):
+    """Filtro por fechas, tipo, código 4 dígitos, material, familia (partida) y responsable."""
+    df_fil = enriquecer_df_movimientos_bodega(df_mov)
+    if "fecha" in df_fil.columns and isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
+        inicio, fin = rango_fechas
+        df_fil["fecha_pura"] = pd.to_datetime(df_fil["fecha"], errors="coerce").dt.date
+        df_fil = df_fil[
+            df_fil["fecha_pura"].notna()
+            & (df_fil["fecha_pura"] >= inicio)
+            & (df_fil["fecha_pura"] <= fin)
+        ]
+    if filtro_tipo != "Todos":
+        df_fil = df_fil[df_fil["tipo_movimiento"].astype(str) == filtro_tipo]
+    q = str(buscar_mov or "").strip()
+    if q:
+        q_low = q.lower()
+        q_digitos = "".join(c for c in q if c.isdigit())
+        mask = (
+            df_fil["nombre_material"].astype(str).str.lower().str.contains(q_low, na=False)
+            | df_fil["persona_responsable"].astype(str).str.lower().str.contains(q_low, na=False)
+            | df_fil["destino"].astype(str).str.lower().str.contains(q_low, na=False)
+            | df_fil["detalle_destino"].astype(str).str.lower().str.contains(q_low, na=False)
+            | df_fil["familia_partida"].astype(str).str.lower().str.contains(q_low, na=False)
+        )
+        if q_digitos:
+            mask = mask | df_fil["codigo_str"].str.contains(q_digitos, na=False)
+        else:
+            mask = mask | df_fil["codigo_str"].astype(str).str.contains(q, case=False, na=False)
+        df_fil = df_fil[mask]
+    return df_fil
+
+
 def _render_bodega_historial_comprobantes():
     st.markdown("#### Historial de movimientos")
     df_mov = cargar_bodega_movimientos_sql(ttl=0)
@@ -3707,8 +4130,8 @@ def _render_bodega_historial_comprobantes():
     c_f1, c_f2 = st.columns([2, 1])
     with c_f1:
         buscar_mov = st.text_input(
-            "Buscar por material, código o responsable",
-            placeholder="Ej: 401, tornillo, Juan Pérez…",
+            "Buscar por código, material, familia (partida) o responsable",
+            placeholder="Ej: 4100, Conductores, Automático…",
             key="bod_hist_buscar",
         )
     with c_f2:
@@ -3730,78 +4153,95 @@ def _render_bodega_historial_comprobantes():
         st.info("Aún no hay movimientos en el historial. Registra entradas o salidas en la pestaña **Registro e Inventario**.")
         return
 
-    df_fil = df_mov.copy()
-    if "fecha" in df_fil.columns and isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
-        inicio, fin = rango_fechas
-        df_fil["fecha_pura"] = pd.to_datetime(df_fil["fecha"], errors="coerce").dt.date
-        df_fil = df_fil[
-            df_fil["fecha_pura"].notna()
-            & (df_fil["fecha_pura"] >= inicio)
-            & (df_fil["fecha_pura"] <= fin)
-        ]
-
-    if filtro_tipo != "Todos":
-        df_fil = df_fil[df_fil["tipo_movimiento"].astype(str) == filtro_tipo]
-    if buscar_mov.strip():
-        q = buscar_mov.strip().lower()
-        mask = (
-            df_fil["nombre_material"].astype(str).str.lower().str.contains(q, na=False)
-            | df_fil["codigo"].astype(str).str.contains(q, na=False)
-            | df_fil["persona_responsable"].astype(str).str.lower().str.contains(q, na=False)
-            | df_fil["destino"].astype(str).str.lower().str.contains(q, na=False)
-        )
-        df_fil = df_fil[mask]
+    df_fil = _filtrar_movimientos_bodega(df_mov, buscar_mov, filtro_tipo, rango_fechas)
 
     if df_fil.empty:
         st.warning("Sin resultados para los filtros aplicados.")
         return
 
-    cols_vis_map = {
-        "id": "ID",
-        "fecha": "Fecha",
-        "tipo_movimiento": "Tipo",
-        "codigo": "Código",
-        "nombre_material": "Material",
-        "cantidad": "Cantidad",
-        "persona_responsable": "Responsable",
-        "destino": "Destino",
-        "detalle_destino": "Detalle destino",
-        "stock_resultante": "Stock resultante",
-    }
-    df_vis = df_fil.drop(columns=["fecha_pura"], errors="ignore").rename(
-        columns={k: v for k, v in cols_vis_map.items() if k in df_fil.columns}
-    )
-    mostrar_tabla(df_vis, width="stretch", hide_index=True)
+    df_tab = df_fil.copy().reset_index(drop=True)
+    df_tab.insert(0, "Seleccionar", False)
 
-    opciones_mov = [
-        f"{r.get('Fecha', '—')} | {r['Tipo']} | {r['Código']} — {r['Material']} ({int(r['Cantidad'])} u.)"
-        for _, r in df_vis.iterrows()
+    cols_editor = [
+        "Seleccionar",
+        "fecha",
+        "tipo_movimiento",
+        "codigo_str",
+        "familia_partida",
+        "nombre_material",
+        "cantidad",
+        "persona_responsable",
+        "destino",
+        "detalle_destino",
+        "stock_resultante",
+        "id",
     ]
-    ids_mov = df_fil["id"].tolist()
+    cols_editor = [c for c in cols_editor if c in df_tab.columns]
+    cols_datos = [c for c in cols_editor if c not in ("Seleccionar", "id")]
 
-    col_sel, col_pdf = st.columns([3, 1], vertical_alignment="bottom")
-    with col_sel:
-        idx_mov = st.selectbox(
-            "Movimiento para comprobante",
-            range(len(opciones_mov)),
-            format_func=lambda i: opciones_mov[i],
-            key="bod_hist_sel_mov",
-        )
+    st.caption("Marque uno o más movimientos con la casilla **Seleccionar** para generar el comprobante PDF.")
+    df_editado = st.data_editor(
+        df_tab[cols_editor],
+        column_config={
+            "Seleccionar": st.column_config.CheckboxColumn("Seleccionar", default=False),
+            "fecha": st.column_config.TextColumn("Fecha"),
+            "tipo_movimiento": st.column_config.TextColumn("Tipo de movimiento"),
+            "codigo_str": st.column_config.TextColumn("Código"),
+            "familia_partida": st.column_config.TextColumn("Familia (Partida)"),
+            "nombre_material": st.column_config.TextColumn("Nombre material"),
+            "cantidad": st.column_config.NumberColumn("Cantidad", format="%d"),
+            "persona_responsable": st.column_config.TextColumn("Persona responsable"),
+            "destino": st.column_config.TextColumn("Destino"),
+            "detalle_destino": st.column_config.TextColumn("Detalle destino"),
+            "stock_resultante": st.column_config.NumberColumn("Stock resultante", format="%d"),
+            "id": None,
+        },
+        column_order=cols_editor,
+        disabled=cols_datos + (["id"] if "id" in cols_editor else []),
+        hide_index=True,
+        num_rows="fixed",
+        width="stretch",
+        key="bod_hist_data_editor",
+    )
+
+    sel_mask = df_editado["Seleccionar"].fillna(False).astype(bool)
+    ids_sel = df_editado.loc[sel_mask, "id"].tolist() if "id" in df_editado.columns else []
+    df_seleccionados = df_fil[df_fil["id"].isin(ids_sel)].copy() if ids_sel else pd.DataFrame()
+    n_sel = len(df_seleccionados)
+
+    col_info, col_pdf = st.columns([2, 1], vertical_alignment="bottom")
+    with col_info:
+        if n_sel == 0:
+            st.info("Seleccione uno o más movimientos de la lista para generar el comprobante.")
+        else:
+            st.success(f"{n_sel} movimiento(s) seleccionado(s) para el PDF.")
     with col_pdf:
-        if FPDF_DISPONIBLE:
-            fila_mov = df_fil.iloc[idx_mov]
-            pdf_vale = generar_pdf_vale_bodega(fila_mov)
-            cod_nom = f"{int(fila_mov['codigo'])}_{int(fila_mov['id'])}"
+        if not FPDF_DISPONIBLE:
+            st.error("Instala fpdf2 para generar comprobantes PDF.")
+        else:
+            pdf_bytes = None
+            df_pdf = _normalizar_df_movimientos_para_pdf(df_seleccionados)
+            if n_sel > 0:
+                pdf_bytes = generar_pdf_comprobante_bodega(df_pdf)
+            col_codigo = _col_movimiento_df(df_seleccionados, "codigo")
+            if col_codigo:
+                codigos_lista = [
+                    formato_codigo_bodega(c) for c in df_seleccionados[col_codigo].head(3).tolist()
+                ]
+            else:
+                codigos_lista = []
+            codigos_nom = "_".join(codigos_lista) or "sin_sel"
+            if n_sel > 3:
+                codigos_nom += f"_y{n_sel - 3}_mas"
             col_pdf.download_button(
                 label="📄 Descargar Comprobante",
-                data=pdf_vale,
-                file_name=f"Vale_Bodega_{cod_nom}.pdf",
+                data=pdf_bytes if pdf_bytes is not None else b"",
+                file_name=f"Comprobante_Bodega_{n_sel}mov_{codigos_nom}.pdf",
                 mime="application/pdf",
                 type="primary",
                 width="stretch",
+                disabled=(n_sel == 0),
             )
-        else:
-            st.error("Instala fpdf2 para generar comprobantes PDF.")
 
 
 # ==========================================
