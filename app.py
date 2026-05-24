@@ -357,7 +357,7 @@ def cargar_bodega_inventario_sql(ttl=0):
         hist = sanitizar_bodega_historial(_df_desde_sql(df_mov, COLUMNAS_BODEGA_HISTORIAL))
         return stock, hist
     except Exception as e:
-        st.sidebar.warning(f"SQL bodega_inventario: {e}")
+        st.warning(f"⚠️ Nota SQL bodega_inventario: {e}")
         return (
             pd.DataFrame(columns=COLUMNAS_BODEGA_STOCK),
             pd.DataFrame(columns=COLUMNAS_BODEGA_HISTORIAL),
@@ -397,6 +397,22 @@ def insertar_material_bodega_sql(
                     "unidad": unidad,
                 },
             )
+            if cantidad > 0:
+                fecha_hoy = datetime.date.today().strftime("%Y-%m-%d")
+                _insert_bodega_movimientos_en_sesion(
+                    session,
+                    _params_bodega_movimiento(
+                        fecha_hoy,
+                        "Entrada",
+                        codigo,
+                        nombre_material,
+                        cantidad,
+                        "Sistema",
+                        "Alta inventario",
+                        cantidad,
+                        detalle_destino="Stock inicial",
+                    ),
+                )
             session.commit()
         recargar_bodega_desde_sql()
         st.session_state.bod_stock_rev = int(st.session_state.get("bod_stock_rev", 0)) + 1
@@ -471,11 +487,142 @@ def eliminar_material_bodega_sql(codigo):
         st.error(f"Error al eliminar material: {e}")
         return False
 
-def insertar_movimiento_bodega_sql(fecha, tipo_mov, codigo, nombre, cantidad, persona, destino, stock_resultante):
+def _parse_destino_bodega(destino_completo):
+    destino = str(destino_completo or "").strip()
+    if " — " in destino:
+        principal, detalle = destino.split(" — ", 1)
+        return principal.strip(), detalle.strip()
+    return destino, ""
+
+
+def _params_bodega_movimiento(
+    fecha, tipo_mov, codigo, nombre, cantidad, persona, destino, stock_resultante, detalle_destino=""
+):
+    destino_prin, detalle_auto = _parse_destino_bodega(destino)
+    detalle_final = str(detalle_destino or detalle_auto).strip()
+    return {
+        "fecha": str(fecha),
+        "tipo_movimiento": str(tipo_mov),
+        "codigo": int(codigo),
+        "nombre_material": str(nombre),
+        "cantidad": int(cantidad),
+        "persona_responsable": str(persona).strip(),
+        "destino": destino_prin,
+        "detalle_destino": detalle_final,
+        "stock_resultante": int(stock_resultante),
+    }
+
+
+def _dict_insert_bodega_movimientos(params):
+    """Parámetros del INSERT histórico (columnas exactas de bodega_movimientos)."""
+    return {
+        "fecha": str(params["fecha"]),
+        "tipo_movimiento": str(params["tipo_movimiento"]),
+        "codigo": int(params["codigo"]),
+        "nombre_material": str(params["nombre_material"]),
+        "cantidad": int(params["cantidad"]),
+        "persona_responsable": str(params["persona_responsable"]).strip(),
+        "destino": str(params["destino"]).strip(),
+        "detalle_destino": str(params.get("detalle_destino") or "").strip(),
+        "stock_resultante": int(params["stock_resultante"]),
+    }
+
+
+def _es_entrada_bodega(tipo_movimiento):
+    return str(tipo_movimiento).strip().lower() in ("entrada", "ingreso")
+
+
+def _es_salida_bodega(tipo_movimiento):
+    return str(tipo_movimiento).strip().lower() in ("salida", "egreso")
+
+
+def obtener_stock_actual_bodega_sql(codigo, ttl=0):
+    """Stock actual del material en bodega_inventario (fila maestra)."""
+    cod = int(codigo)
     try:
-        conn.session.execute(
+        df_raw = conn.query(
+            f"""
+            SELECT nombre_material, cantidad
+            FROM bodega_inventario
+            WHERE codigo = {cod}
+              AND (tipo_movimiento IS NULL OR TRIM(COALESCE(tipo_movimiento::text, '')) = '')
+            LIMIT 1
+            """,
+            ttl=ttl,
+        )
+        if df_raw is None or df_raw.empty:
+            df_raw = conn.query(
+                f"""
+                SELECT nombre_material, cantidad
+                FROM bodega_inventario
+                WHERE codigo = {cod}
+                ORDER BY id DESC NULLS LAST
+                LIMIT 1
+                """,
+                ttl=ttl,
+            )
+        if df_raw is None or df_raw.empty:
+            return None
+        out = df_raw.copy()
+        out.columns = [str(c).strip().lower().replace(" ", "_") for c in out.columns]
+        return {
+            "nombre_material": str(out.iloc[0].get("nombre_material", "")),
+            "cantidad": int(pd.to_numeric(out.iloc[0].get("cantidad", 0), errors="coerce") or 0),
+        }
+    except Exception:
+        return None
+
+
+def _insert_bodega_movimientos_en_sesion(session, params):
+    session.execute(
+        text("""
+            INSERT INTO bodega_movimientos (
+                fecha, tipo_movimiento, codigo, nombre_material, cantidad,
+                persona_responsable, destino, detalle_destino, stock_resultante
+            ) VALUES (
+                :fecha, :tipo_movimiento, :codigo, :nombre_material, :cantidad,
+                :persona_responsable, :destino, :detalle_destino, :stock_resultante
+            )
+        """),
+        _dict_insert_bodega_movimientos(params),
+    )
+
+
+def _registrar_movimiento_bodega_transaccion(
+    fecha,
+    tipo_movimiento,
+    codigo,
+    nombre_material,
+    cantidad_digitada,
+    persona_responsable,
+    destino,
+    nuevo_stock,
+    detalle_destino="",
+):
+    destino_prin, detalle_auto = _parse_destino_bodega(destino)
+    params_hist = {
+        "fecha": str(fecha),
+        "tipo_movimiento": str(tipo_movimiento),
+        "codigo": int(codigo),
+        "nombre_material": str(nombre_material),
+        "cantidad": int(cantidad_digitada),
+        "persona_responsable": str(persona_responsable).strip(),
+        "destino": destino_prin,
+        "detalle_destino": str(detalle_destino or detalle_auto).strip(),
+        "stock_resultante": int(nuevo_stock),
+    }
+    with conn.session as session:
+        session.execute(
             text("""
-                INSERT INTO bodega_inventario (
+                UPDATE bodega_inventario
+                SET cantidad = :nuevo_stock
+                WHERE codigo = :codigo
+            """),
+            {"nuevo_stock": int(nuevo_stock), "codigo": int(codigo)},
+        )
+        session.execute(
+            text("""
+                INSERT INTO bodega_movimientos (
                     fecha, tipo_movimiento, codigo, nombre_material, cantidad,
                     persona_responsable, destino, stock_resultante
                 ) VALUES (
@@ -483,23 +630,37 @@ def insertar_movimiento_bodega_sql(fecha, tipo_mov, codigo, nombre, cantidad, pe
                     :persona_responsable, :destino, :stock_resultante
                 )
             """),
-            {
-                "fecha": str(fecha),
-                "tipo_movimiento": str(tipo_mov),
-                "codigo": int(codigo),
-                "nombre_material": str(nombre),
-                "cantidad": int(cantidad),
-                "persona_responsable": str(persona).strip(),
-                "destino": str(destino).strip(),
-                "stock_resultante": int(stock_resultante),
-            },
+            params_hist,
         )
-        conn.session.commit()
-        return True
+        session.commit()
+
+
+def cargar_bodega_movimientos_sql(ttl=0):
+    try:
+        df_raw = conn.query(
+            """
+            SELECT id, fecha, tipo_movimiento, codigo, nombre_material, cantidad,
+                   persona_responsable, destino, detalle_destino, stock_resultante
+            FROM bodega_movimientos
+            ORDER BY fecha DESC NULLS LAST, id DESC
+            """,
+            ttl=ttl,
+        )
+        if df_raw is None or df_raw.empty:
+            return pd.DataFrame(columns=COLUMNAS_BODEGA_MOVIMIENTOS)
+        out = df_raw.copy()
+        out.columns = [str(c).strip().lower().replace(" ", "_") for c in out.columns]
+        for col in COLUMNAS_BODEGA_MOVIMIENTOS:
+            if col not in out.columns:
+                out[col] = 0 if col in ("id", "codigo", "cantidad", "stock_resultante") else ""
+        out["id"] = pd.to_numeric(out["id"], errors="coerce").fillna(0).astype(int)
+        out["codigo"] = pd.to_numeric(out["codigo"], errors="coerce").fillna(0).astype(int)
+        out["cantidad"] = pd.to_numeric(out["cantidad"], errors="coerce").fillna(0).astype(int)
+        out["stock_resultante"] = pd.to_numeric(out["stock_resultante"], errors="coerce").fillna(0).astype(int)
+        return out[COLUMNAS_BODEGA_MOVIMIENTOS]
     except Exception as e:
-        conn.session.rollback()
-        st.error(f"Error al registrar movimiento: {e}")
-        return False
+        st.warning(f"⚠️ Nota SQL bodega_movimientos: {e}")
+        return pd.DataFrame(columns=COLUMNAS_BODEGA_MOVIMIENTOS)
 
 def sincronizar_bodega_stock_sql(df_stock):
     ok = True
@@ -1589,6 +1750,10 @@ COLUMNAS_BODEGA_HISTORIAL = [
     "fecha", "tipo_movimiento", "codigo", "nombre_material", "cantidad",
     "persona_responsable", "destino", "stock_resultante",
 ]
+COLUMNAS_BODEGA_MOVIMIENTOS = [
+    "id", "fecha", "tipo_movimiento", "codigo", "nombre_material", "cantidad",
+    "persona_responsable", "destino", "detalle_destino", "stock_resultante",
+]
 
 def sanitizar_bodega_stock(df):
     if df is None or df.empty:
@@ -1676,53 +1841,57 @@ def stock_actual_material(codigo):
 
 def registrar_movimiento_bodega(codigo, cantidad, tipo_mov, fecha, persona, destino):
     """
-    Aplica entrada/salida en bodega_inventario (stock maestro + fila de historial).
+    Consulta stock actual, calcula Entrada/Salida, UPDATE inventario + INSERT historial (una transacción).
     Retorna (ok, mensaje, stock_resultante o None).
     """
-    recargar_bodega_desde_sql()
-
-    cantidad = int(round(float(cantidad)))
-    if cantidad <= 0:
+    cantidad_digitada = int(round(float(cantidad)))
+    if cantidad_digitada <= 0:
         return False, "La cantidad debe ser un entero mayor a 0.", None
 
     codigo = int(codigo)
-    tipo_mov = str(tipo_mov).strip()
-    if tipo_mov not in ("Entrada", "Salida"):
-        return False, "Tipo de movimiento inválido.", None
+    tipo_movimiento = str(tipo_mov).strip()
 
-    stock = sanitizar_bodega_stock(st.session_state.bodega_stock)
-    fila = stock[stock["codigo"] == codigo]
-    if fila.empty:
+    fila_stock = obtener_stock_actual_bodega_sql(codigo, ttl=0)
+    if fila_stock is None:
         return False, f"No existe material con código {codigo}.", None
 
-    idx = fila.index[0]
-    nombre = str(stock.at[idx, "nombre_material"])
-    stock_actual = int(stock.at[idx, "cantidad"])
+    stock_actual = int(fila_stock["cantidad"])
+    nombre_material = str(fila_stock["nombre_material"])
 
-    if tipo_mov == "Salida" and cantidad > stock_actual:
-        return False, f"Cantidad insuficiente en bodega. Stock actual: {stock_actual}", stock_actual
-
-    if tipo_mov == "Entrada":
-        nuevo_stock = int(stock_actual + cantidad)
+    if _es_entrada_bodega(tipo_movimiento):
+        nuevo_stock = stock_actual + cantidad_digitada
+    elif _es_salida_bodega(tipo_movimiento):
+        nuevo_stock = stock_actual - cantidad_digitada
     else:
-        nuevo_stock = int(stock_actual - cantidad)
+        return False, "Tipo de movimiento inválido (use Entrada o Salida).", None
 
     if nuevo_stock < 0:
         return False, f"Cantidad insuficiente en bodega. Stock actual: {stock_actual}", stock_actual
 
-    if not actualizar_stock_maestro_sql(codigo, nuevo_stock):
-        return False, "No se pudo actualizar el stock en Supabase.", stock_actual
-
     fecha_str = fecha.strftime("%Y-%m-%d") if hasattr(fecha, "strftime") else str(fecha)
-    if not insertar_movimiento_bodega_sql(
-        fecha_str, tipo_mov, codigo, nombre, cantidad, persona, destino, nuevo_stock
-    ):
-        return False, "Stock actualizado, pero falló el registro del movimiento.", nuevo_stock
 
-    recargar_bodega_desde_sql()
-    msg_ok = f"{tipo_mov} registrada. Stock actualizado: {nuevo_stock} un."
-    refrescar_widgets_bodega_tras_movimiento(mensaje_flash=msg_ok, rerun=True)
-    return True, msg_ok, nuevo_stock
+    try:
+        _registrar_movimiento_bodega_transaccion(
+            fecha=fecha_str,
+            tipo_movimiento=tipo_movimiento,
+            codigo=codigo,
+            nombre_material=nombre_material,
+            cantidad_digitada=cantidad_digitada,
+            persona_responsable=persona,
+            destino=destino,
+            nuevo_stock=nuevo_stock,
+        )
+        recargar_bodega_desde_sql()
+        msg_ok = f"{tipo_movimiento} registrada. Stock actualizado: {nuevo_stock} un."
+        refrescar_widgets_bodega_tras_movimiento(mensaje_flash=msg_ok, rerun=True)
+        return True, msg_ok, nuevo_stock
+    except Exception as e:
+        try:
+            conn.session.rollback()
+        except Exception:
+            pass
+        st.error(f"Error al registrar movimiento: {e}")
+        return False, str(e), None
 
 def refrescar_widgets_bodega_tras_movimiento(mensaje_flash=None, rerun=True):
     """Sincroniza UI tras cambio de stock en Supabase."""
@@ -2746,198 +2915,181 @@ def _fragment_modulo_bodega():
     st.session_state.bodega_stock = df_stock_sql
     st.session_state.bodega_historial = df_hist_sql
 
-    tab_mov, tab_stock = st.tabs(["↔️ Entradas y Salidas", "📋 Inventario de materiales"])
+    tab_registro, tab_historial = st.tabs(["📦 Registro e Inventario", "📜 Historial y Comprobantes"])
 
-    with tab_mov:
-        with st.container(border=True):
-            st.markdown("#### Registrar movimiento")
-            if st.session_state.bodega_stock.empty:
-                st.warning("Primero registra materiales en la pestaña **Inventario de materiales**.")
-            else:
-                bod_rev = st.session_state.get("bod_stock_rev", 0)
-                opciones_mat, mapa_mat = opciones_material_bodega(st.session_state.bodega_stock)
-                col_tipo, col_mat = st.columns([1, 2])
-                tipo_mov = col_tipo.selectbox("Tipo de movimiento", ["Entrada", "Salida"], key="bod_tipo_mov")
-                material_sel = col_mat.selectbox(
-                    "Material (código — nombre)",
-                    opciones_mat,
-                    key=f"bod_material_sel_{bod_rev}",
-                )
-                codigo_mov = mapa_mat.get(material_sel)
+    with tab_registro:
+        tab_mov, tab_stock = st.tabs(["↔️ Entradas y Salidas", "📋 Inventario de materiales"])
 
-                if codigo_mov is not None:
-                    stock_previo = stock_actual_material(codigo_mov)
-                    if stock_previo is not None:
-                        col_mat.caption(f"Stock actual en bodega: **{stock_previo}** un.")
-
-                c1, c2, c3 = st.columns(3)
-                cant_mov = c1.number_input(
-                    "cantidad",
-                    min_value=1,
-                    step=1,
-                    value=1,
-                    format="%d",
-                    key="bod_cant_mov",
-                )
-                fecha_mov = c2.date_input("fecha", value=datetime.date.today(), format="DD/MM/YYYY", key="bod_fecha_mov")
-                persona_mov = c3.text_input("Persona responsable", placeholder="Quién entrega o retira", key="bod_persona_mov")
-
-                proyectos_dest = ["— Seleccione destino —"]
-                if not st.session_state.proyectos_resumen.empty:
-                    proyectos_dest += st.session_state.proyectos_resumen["Proyecto"].tolist()
-                proyectos_dest += ["Otro / Bodega general", "Mantenimiento", "Obra en terreno"]
-
-                col_d1, col_d2 = st.columns(2)
-                destino_tipo = col_d1.selectbox("destino", proyectos_dest, key="bod_destino_sel")
-                destino_otro = col_d2.text_input(
-                    "Detalle de destino (si aplica)",
-                    placeholder="Ej: Bodega central, vehículo N°3…",
-                    key="bod_destino_txt",
-                )
-                if destino_tipo == "— Seleccione destino —":
-                    destino_final = destino_otro.strip()
-                elif destino_tipo == "Otro / Bodega general":
-                    destino_final = destino_otro.strip() or "Bodega general"
+        with tab_mov:
+            with st.container(border=True):
+                st.markdown("#### Registrar movimiento")
+                if st.session_state.bodega_stock.empty:
+                    st.warning("Primero registra materiales en la pestaña **Inventario de materiales**.")
                 else:
-                    destino_final = destino_tipo if not destino_otro.strip() else f"{destino_tipo} — {destino_otro.strip()}"
+                    bod_rev = st.session_state.get("bod_stock_rev", 0)
+                    opciones_mat, mapa_mat = opciones_material_bodega(st.session_state.bodega_stock)
+                    col_tipo, col_mat = st.columns([1, 2])
+                    tipo_mov = col_tipo.selectbox("Tipo de movimiento", ["Entrada", "Salida"], key="bod_tipo_mov")
+                    material_sel = col_mat.selectbox(
+                        "Material (código — nombre)",
+                        opciones_mat,
+                        key=f"bod_material_sel_{bod_rev}",
+                    )
+                    codigo_mov = mapa_mat.get(material_sel)
 
-                if st.button("Registrar movimiento", type="primary", key="bod_btn_mov"):
-                    if not persona_mov.strip():
-                        st.error("Indica la persona responsable.")
-                    elif not destino_final:
-                        st.error("Indica el destino del material.")
-                    elif codigo_mov is None:
-                        st.error("Selecciona un material válido.")
+                    if codigo_mov is not None:
+                        stock_previo = stock_actual_material(codigo_mov)
+                        if stock_previo is not None:
+                            col_mat.caption(f"Stock actual en bodega: **{stock_previo}** un.")
+
+                    c1, c2, c3 = st.columns(3)
+                    cant_mov = c1.number_input(
+                        "cantidad",
+                        min_value=1,
+                        step=1,
+                        value=1,
+                        format="%d",
+                        key="bod_cant_mov",
+                    )
+                    fecha_mov = c2.date_input("fecha", value=datetime.date.today(), format="DD/MM/YYYY", key="bod_fecha_mov")
+                    persona_mov = c3.text_input("Persona responsable", placeholder="Quién entrega o retira", key="bod_persona_mov")
+
+                    proyectos_dest = ["— Seleccione destino —"]
+                    if not st.session_state.proyectos_resumen.empty:
+                        proyectos_dest += st.session_state.proyectos_resumen["Proyecto"].tolist()
+                    proyectos_dest += ["Otro / Bodega general", "Mantenimiento", "Obra en terreno"]
+
+                    col_d1, col_d2 = st.columns(2)
+                    destino_tipo = col_d1.selectbox("destino", proyectos_dest, key="bod_destino_sel")
+                    destino_otro = col_d2.text_input(
+                        "Detalle de destino (si aplica)",
+                        placeholder="Ej: Bodega central, vehículo N°3…",
+                        key="bod_destino_txt",
+                    )
+                    if destino_tipo == "— Seleccione destino —":
+                        destino_final = destino_otro.strip()
+                    elif destino_tipo == "Otro / Bodega general":
+                        destino_final = destino_otro.strip() or "Bodega general"
                     else:
-                        cant_int = int(cant_mov)
-                        if tipo_mov == "Salida" and codigo_mov is not None:
-                            stock_chk = stock_actual_material(codigo_mov)
-                            if stock_chk is not None and cant_int > stock_chk:
-                                st.error(f"Cantidad insuficiente en bodega. Stock actual: {stock_chk}")
-                            else:
-                                ok, msg, _stock_res = registrar_movimiento_bodega(
-                                    codigo_mov, cant_int, tipo_mov, fecha_mov, persona_mov, destino_final
-                                )
-                                if not ok:
-                                    st.error(msg)
+                        destino_final = destino_tipo if not destino_otro.strip() else f"{destino_tipo} — {destino_otro.strip()}"
+
+                    if st.button("Registrar movimiento", type="primary", key="bod_btn_mov"):
+                        if not persona_mov.strip():
+                            st.error("Indica la persona responsable.")
+                        elif not destino_final:
+                            st.error("Indica el destino del material.")
+                        elif codigo_mov is None:
+                            st.error("Selecciona un material válido.")
                         else:
                             ok, msg, _stock_res = registrar_movimiento_bodega(
-                                codigo_mov, cant_int, tipo_mov, fecha_mov, persona_mov, destino_final
+                                codigo_mov,
+                                int(cant_mov),
+                                tipo_mov,
+                                fecha_mov,
+                                persona_mov,
+                                destino_final,
                             )
                             if not ok:
                                 st.error(msg)
 
-        with st.container(border=True):
-            st.markdown("#### Registro de movimientos")
-            hist = sanitizar_bodega_historial(cargar_bodega_inventario_sql(ttl=0)[1])
-            cols_hist = [c for c in COLUMNAS_BODEGA_HISTORIAL if c in hist.columns]
-            if hist.empty:
-                st.info("Aún no hay entradas ni salidas registradas.")
-            else:
-                hist = hist[cols_hist].copy()
-                hist["_orden"] = pd.to_datetime(hist["fecha"], errors="coerce")
-                hist = hist.sort_values("_orden", ascending=False).drop(columns=["_orden"])
-                st.dataframe(
-                    hist,
-                    column_order=cols_hist,
-                    width="stretch",
-                    hide_index=True,
+        with tab_stock:
+            with st.container(border=True):
+                st.markdown("#### 🔍 Buscar en inventario de materiales")
+                busqueda_bod = st.text_input(
+                    "Buscar por código o nombre:",
+                    placeholder="Ej: 401, tornillo, cable…",
+                    key="bod_busqueda",
                 )
+                df_stock_vista = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
+                if busqueda_bod:
+                    mask_b = (
+                        df_stock_vista["codigo"].astype(str).str.contains(busqueda_bod, case=False, na=False)
+                        | df_stock_vista["nombre_material"].astype(str).str.contains(busqueda_bod, case=False, na=False)
+                        | df_stock_vista["familia"].astype(str).str.contains(busqueda_bod, case=False, na=False)
+                    )
+                    df_stock_vista = df_stock_vista[mask_b]
+                    if df_stock_vista.empty:
+                        st.warning("Sin coincidencias en el inventario de materiales.")
 
-    with tab_stock:
-        with st.container(border=True):
-            st.markdown("#### 🔍 Buscar en inventario de materiales")
-            busqueda_bod = st.text_input(
-                "Buscar por código o nombre:",
-                placeholder="Ej: 401, tornillo, cable…",
-                key="bod_busqueda",
-            )
-            df_stock_vista = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
-            if busqueda_bod:
-                mask_b = (
-                    df_stock_vista["codigo"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                    | df_stock_vista["nombre_material"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                    | df_stock_vista["familia"].astype(str).str.contains(busqueda_bod, case=False, na=False)
-                )
-                df_stock_vista = df_stock_vista[mask_b]
-                if df_stock_vista.empty:
-                    st.warning("Sin coincidencias en el inventario de materiales.")
-
-        with st.container(border=True):
-            with st.expander("➕ Alta en inventario de materiales", expanded=False):
-                st.caption("Familia = partida (400 tornillería). Códigos típicos: 401, 402, 403…")
-                ca, cb, cc = st.columns([1, 1, 2])
-                familia_nueva = ca.number_input("Familia (partida)", min_value=1, step=1, value=400, format="%d", key="bod_fam_nueva")
-                autogen = cb.checkbox("Autogenerar código", value=True, key="bod_autogen")
-                sugerido = sugerir_codigo_bodega(st.session_state.bodega_stock, familia_nueva)
-                if autogen:
-                    codigo_nuevo = int(sugerido)
-                    st.caption(f"Código sugerido para familia {int(familia_nueva)}: **{codigo_nuevo}**")
-                else:
-                    codigo_nuevo = cb.number_input("Código", min_value=1, step=1, value=int(sugerido), format="%d", key="bod_cod_manual")
-                nombre_nuevo = cc.text_input("Nombre del material", key="bod_nom_nuevo")
-                cd1, cd2 = st.columns(2)
-                desc_nueva = cd1.text_input("Descripción / categoría", placeholder="Ej: Tornillería", key="bod_desc_nueva")
-                stock_inicial = cd2.number_input("Stock inicial", min_value=0, step=1, value=0, format="%d", key="bod_stock_ini")
-                if st.button("Guardar material", type="primary", key="bod_btn_alta"):
-                    if not str(nombre_nuevo).strip():
-                        st.error("El nombre del material es obligatorio.")
+            with st.container(border=True):
+                with st.expander("➕ Alta en inventario de materiales", expanded=False):
+                    st.caption("Familia = partida (400 tornillería). Códigos típicos: 401, 402, 403…")
+                    ca, cb, cc = st.columns([1, 1, 2])
+                    familia_nueva = ca.number_input("Familia (partida)", min_value=1, step=1, value=400, format="%d", key="bod_fam_nueva")
+                    autogen = cb.checkbox("Autogenerar código", value=True, key="bod_autogen")
+                    sugerido = sugerir_codigo_bodega(st.session_state.bodega_stock, familia_nueva)
+                    if autogen:
+                        codigo_nuevo = int(sugerido)
+                        st.caption(f"Código sugerido para familia {int(familia_nueva)}: **{codigo_nuevo}**")
                     else:
-                        codigo = int(codigo_nuevo)
-                        familia = int(familia_nueva)
-                        nombre_material = str(nombre_nuevo).strip()
-                        descripcion = str(desc_nueva).strip()
-                        cantidad = int(stock_inicial)
-                        unidad = "un"
-                        stock_df = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
-                        if (stock_df["codigo"] == codigo).any():
-                            st.error(f"El código {codigo} ya existe. Elige otro o activa autogenerar.")
+                        codigo_nuevo = cb.number_input("Código", min_value=1, step=1, value=int(sugerido), format="%d", key="bod_cod_manual")
+                    nombre_nuevo = cc.text_input("Nombre del material", key="bod_nom_nuevo")
+                    cd1, cd2 = st.columns(2)
+                    desc_nueva = cd1.text_input("Descripción / categoría", placeholder="Ej: Tornillería", key="bod_desc_nueva")
+                    stock_inicial = cd2.number_input("Stock inicial", min_value=0, step=1, value=0, format="%d", key="bod_stock_ini")
+                    if st.button("Guardar material", type="primary", key="bod_btn_alta"):
+                        if not str(nombre_nuevo).strip():
+                            st.error("El nombre del material es obligatorio.")
                         else:
-                            insertar_material_bodega_sql(
-                                codigo=codigo,
-                                familia=familia,
-                                nombre_material=nombre_material,
-                                descripcion=descripcion,
-                                cantidad=cantidad,
-                                unidad=unidad,
-                            )
+                            codigo = int(codigo_nuevo)
+                            familia = int(familia_nueva)
+                            nombre_material = str(nombre_nuevo).strip()
+                            descripcion = str(desc_nueva).strip()
+                            cantidad = int(stock_inicial)
+                            unidad = "un"
+                            stock_df = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
+                            if (stock_df["codigo"] == codigo).any():
+                                st.error(f"El código {codigo} ya existe. Elige otro o activa autogenerar.")
+                            else:
+                                insertar_material_bodega_sql(
+                                    codigo=codigo,
+                                    familia=familia,
+                                    nombre_material=nombre_material,
+                                    descripcion=descripcion,
+                                    cantidad=cantidad,
+                                    unidad=unidad,
+                                )
 
+            with st.container(border=True):
+                st.markdown("#### Inventario actual")
+                st.caption("Datos sincronizados con la tabla **bodega_inventario** en Supabase SQL.")
+                df_stock_editor = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
+                cols_stock = [c for c in COLUMNAS_BODEGA_STOCK if c in df_stock_editor.columns]
+                if df_stock_editor.empty:
+                    st.info("El inventario de materiales está vacío. Usa el formulario de alta.")
+                else:
+                    df_stock_edit = st.data_editor(
+                        df_stock_editor[cols_stock],
+                        column_config={
+                            "codigo": st.column_config.NumberColumn("Código", min_value=1, step=1, format="%d"),
+                            "familia": st.column_config.NumberColumn("Familia", min_value=1, step=1, format="%d"),
+                            "nombre_material": st.column_config.TextColumn("Material"),
+                            "descripcion": st.column_config.TextColumn("Descripción"),
+                            "cantidad": st.column_config.NumberColumn("Stock actual", min_value=0, step=1, format="%d"),
+                            "unidad": st.column_config.TextColumn("Unidad"),
+                        },
+                        column_order=cols_stock,
+                        disabled=["codigo", "cantidad"],
+                        hide_index=True,
+                        width="stretch",
+                        key=f"ed_bodega_stock_{st.session_state.get('bod_stock_rev', 0)}",
+                    )
+                    st.caption("El **stock actual** se actualiza automáticamente al registrar entradas o salidas.")
+                    if st.button("💾 Guardar inventario de materiales", type="primary", key="bod_save_stock"):
+                        if sincronizar_bodega_stock_sql(df_stock_edit):
+                            refrescar_sql_ui("Inventario actualizado en bodega_inventario.")
+                    with st.expander("🗑️ Eliminar material del inventario"):
+                        opts_del = [f"{int(r['codigo'])} — {r['nombre_material']}" for _, r in df_stock_edit.iterrows()]
+                        if opts_del:
+                            sel_del = st.selectbox("Material a eliminar", opts_del, key="bod_del_mat")
+                            if st.button("Eliminar del inventario", type="primary", key="bod_btn_del_mat"):
+                                cod_del = int(sel_del.split("—")[0].strip())
+                                if eliminar_material_bodega_sql(cod_del):
+                                    refrescar_sql_ui("Material eliminado del inventario.")
+
+    with tab_historial:
         with st.container(border=True):
-            st.markdown("#### Inventario actual")
-            st.caption("Datos sincronizados con la tabla **bodega_inventario** en Supabase SQL.")
-            df_stock_editor = sanitizar_bodega_stock(cargar_bodega_inventario_sql(ttl=0)[0])
-            cols_stock = [c for c in COLUMNAS_BODEGA_STOCK if c in df_stock_editor.columns]
-            if df_stock_editor.empty:
-                st.info("El inventario de materiales está vacío. Usa el formulario de alta.")
-            else:
-                df_stock_edit = st.data_editor(
-                    df_stock_editor[cols_stock],
-                    column_config={
-                        "codigo": st.column_config.NumberColumn("Código", min_value=1, step=1, format="%d"),
-                        "familia": st.column_config.NumberColumn("Familia", min_value=1, step=1, format="%d"),
-                        "nombre_material": st.column_config.TextColumn("Material"),
-                        "descripcion": st.column_config.TextColumn("Descripción"),
-                        "cantidad": st.column_config.NumberColumn("Stock actual", min_value=0, step=1, format="%d"),
-                        "unidad": st.column_config.TextColumn("Unidad"),
-                    },
-                    column_order=cols_stock,
-                    disabled=["codigo", "cantidad"],
-                    hide_index=True,
-                    width="stretch",
-                    key=f"ed_bodega_stock_{st.session_state.get('bod_stock_rev', 0)}",
-                )
-                st.caption("El **stock actual** se actualiza automáticamente al registrar entradas o salidas.")
-                if st.button("💾 Guardar inventario de materiales", type="primary", key="bod_save_stock"):
-                    if sincronizar_bodega_stock_sql(df_stock_edit):
-                        refrescar_sql_ui("Inventario actualizado en bodega_inventario.")
-                with st.expander("🗑️ Eliminar material del inventario"):
-                    opts_del = [f"{int(r['codigo'])} — {r['nombre_material']}" for _, r in df_stock_edit.iterrows()]
-                    if opts_del:
-                        sel_del = st.selectbox("Material a eliminar", opts_del, key="bod_del_mat")
-                        if st.button("Eliminar del inventario", type="primary", key="bod_btn_del_mat"):
-                            cod_del = int(sel_del.split("—")[0].strip())
-                            if eliminar_material_bodega_sql(cod_del):
-                                refrescar_sql_ui("Material eliminado del inventario.")
+            _render_bodega_historial_comprobantes()
 
 
 def _migrar_dias_duracion_tareas(df):
@@ -3393,6 +3545,173 @@ def generar_etiqueta_pdf(serie):
         pdf_bytes = f.read()
     os.remove(temp_path)
     return pdf_bytes
+
+def generar_pdf_vale_bodega(mov):
+    """Vale de bodega en cuadrícula (FPDF, 8pt)."""
+    pdf = FPDF(unit="mm", format="A4")
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    def _val(clave, default=""):
+        if hasattr(mov, "get"):
+            v = mov.get(clave, default)
+        else:
+            v = getattr(mov, clave, default) if clave in mov.index else default
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return default
+        return v
+
+    filas_datos = [
+        ("Tipo de movimiento", str(_val("tipo_movimiento"))),
+        ("Código", str(int(_val("codigo", 0) or 0))),
+        ("Material", str(_val("nombre_material"))),
+        ("Cantidad", str(int(_val("cantidad", 0) or 0))),
+        ("Fecha", str(_val("fecha"))),
+        ("Persona responsable", str(_val("persona_responsable"))),
+        ("Destino", str(_val("destino"))),
+        ("Detalle del destino", str(_val("detalle_destino")) or "—"),
+        ("Stock resultante", str(int(_val("stock_resultante", 0) or 0))),
+    ]
+
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, _pdf_texto_latin1("Voltify ERP - VALE DE BODEGA"), ln=True, align="C")
+    pdf.ln(4)
+
+    x0, w_lbl, w_val, h = 15, 55, 120, 7
+    _pdf_celda(pdf, x0, pdf.get_y(), w_lbl + w_val, h, "Datos del movimiento", align="C", header=True)
+    y = pdf.get_y() + h
+    pdf.set_font("Arial", "", 8)
+    for etiqueta, valor in filas_datos:
+        _pdf_celda(pdf, x0, y, w_lbl, h, etiqueta, bold=False, font_size=8)
+        _pdf_celda(pdf, x0 + w_lbl, y, w_val, h, valor, align="L", font_size=8)
+        y += h
+
+    y += 12
+    ancho_firma = 75
+    espacio = 20
+    x_f1 = 15
+    x_f2 = x_f1 + ancho_firma + espacio
+    pdf.set_font("Arial", "", 8)
+    pdf.line(x_f1, y, x_f1 + ancho_firma, y)
+    pdf.line(x_f2, y, x_f2 + ancho_firma, y)
+    y += 4
+    pdf.set_xy(x_f1, y)
+    pdf.cell(ancho_firma, 5, _pdf_texto_latin1("Firma Encargado Bodega"), align="C")
+    pdf.set_xy(x_f2, y)
+    pdf.cell(ancho_firma, 5, _pdf_texto_latin1("Firma Persona que Retira"), align="C")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        temp_path = tmp.name
+    pdf.output(temp_path)
+    with open(temp_path, "rb") as f:
+        pdf_bytes = f.read()
+    os.remove(temp_path)
+    return pdf_bytes
+
+
+def _render_bodega_historial_comprobantes():
+    st.markdown("#### Historial de movimientos")
+    df_mov = cargar_bodega_movimientos_sql(ttl=0)
+
+    c_f1, c_f2 = st.columns([2, 1])
+    with c_f1:
+        buscar_mov = st.text_input(
+            "Buscar por material, código o responsable",
+            placeholder="Ej: 401, tornillo, Juan Pérez…",
+            key="bod_hist_buscar",
+        )
+    with c_f2:
+        filtro_tipo = st.selectbox(
+            "Tipo",
+            ["Todos", "Entrada", "Salida"],
+            key="bod_hist_tipo",
+        )
+
+    fecha_inicio_def = datetime.date.today() - datetime.timedelta(days=30)
+    fecha_fin_def = datetime.date.today()
+    rango_fechas = st.date_input(
+        "📅 Filtrar por Rango de Fechas",
+        value=(fecha_inicio_def, fecha_fin_def),
+        key="bodega_filtro_rango_fechas",
+    )
+
+    if df_mov.empty:
+        st.info("Aún no hay movimientos en el historial. Registra entradas o salidas en la pestaña **Registro e Inventario**.")
+        return
+
+    df_fil = df_mov.copy()
+    if "fecha" in df_fil.columns and isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
+        inicio, fin = rango_fechas
+        df_fil["fecha_pura"] = pd.to_datetime(df_fil["fecha"], errors="coerce").dt.date
+        df_fil = df_fil[
+            df_fil["fecha_pura"].notna()
+            & (df_fil["fecha_pura"] >= inicio)
+            & (df_fil["fecha_pura"] <= fin)
+        ]
+
+    if filtro_tipo != "Todos":
+        df_fil = df_fil[df_fil["tipo_movimiento"].astype(str) == filtro_tipo]
+    if buscar_mov.strip():
+        q = buscar_mov.strip().lower()
+        mask = (
+            df_fil["nombre_material"].astype(str).str.lower().str.contains(q, na=False)
+            | df_fil["codigo"].astype(str).str.contains(q, na=False)
+            | df_fil["persona_responsable"].astype(str).str.lower().str.contains(q, na=False)
+            | df_fil["destino"].astype(str).str.lower().str.contains(q, na=False)
+        )
+        df_fil = df_fil[mask]
+
+    if df_fil.empty:
+        st.warning("Sin resultados para los filtros aplicados.")
+        return
+
+    cols_vis_map = {
+        "id": "ID",
+        "fecha": "Fecha",
+        "tipo_movimiento": "Tipo",
+        "codigo": "Código",
+        "nombre_material": "Material",
+        "cantidad": "Cantidad",
+        "persona_responsable": "Responsable",
+        "destino": "Destino",
+        "detalle_destino": "Detalle destino",
+        "stock_resultante": "Stock resultante",
+    }
+    df_vis = df_fil.drop(columns=["fecha_pura"], errors="ignore").rename(
+        columns={k: v for k, v in cols_vis_map.items() if k in df_fil.columns}
+    )
+    st.dataframe(df_vis, width="stretch", hide_index=True)
+
+    opciones_mov = [
+        f"{r.get('Fecha', '—')} | {r['Tipo']} | {r['Código']} — {r['Material']} ({int(r['Cantidad'])} u.)"
+        for _, r in df_vis.iterrows()
+    ]
+    ids_mov = df_fil["id"].tolist()
+
+    col_sel, col_pdf = st.columns([3, 1], vertical_alignment="bottom")
+    with col_sel:
+        idx_mov = st.selectbox(
+            "Movimiento para comprobante",
+            range(len(opciones_mov)),
+            format_func=lambda i: opciones_mov[i],
+            key="bod_hist_sel_mov",
+        )
+    with col_pdf:
+        if FPDF_DISPONIBLE:
+            fila_mov = df_fil.iloc[idx_mov]
+            pdf_vale = generar_pdf_vale_bodega(fila_mov)
+            cod_nom = f"{int(fila_mov['codigo'])}_{int(fila_mov['id'])}"
+            col_pdf.download_button(
+                label="📄 Descargar Comprobante",
+                data=pdf_vale,
+                file_name=f"Vale_Bodega_{cod_nom}.pdf",
+                mime="application/pdf",
+                type="primary",
+                width="stretch",
+            )
+        else:
+            st.error("Instala fpdf2 para generar comprobantes PDF.")
+
 
 # ==========================================
 # 4. CONTROL DE ACCESOS Y PANTALLA DE LOGIN

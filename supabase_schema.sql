@@ -31,6 +31,22 @@ CREATE TABLE IF NOT EXISTS bodega_inventario (
 CREATE INDEX IF NOT EXISTS idx_bodega_codigo ON bodega_inventario (codigo);
 CREATE INDEX IF NOT EXISTS idx_bodega_tipo_mov ON bodega_inventario (tipo_movimiento);
 
+CREATE TABLE IF NOT EXISTS bodega_movimientos (
+    id SERIAL PRIMARY KEY,
+    fecha TEXT,
+    tipo_movimiento TEXT,
+    codigo INTEGER,
+    nombre_material TEXT,
+    cantidad INTEGER DEFAULT 0,
+    persona_responsable TEXT,
+    destino TEXT,
+    detalle_destino TEXT,
+    stock_resultante INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_bodega_mov_fecha ON bodega_movimientos (fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_bodega_mov_codigo ON bodega_movimientos (codigo);
+
 CREATE TABLE IF NOT EXISTS proyectos (
     id SERIAL PRIMARY KEY,
     nombre TEXT NOT NULL UNIQUE,
